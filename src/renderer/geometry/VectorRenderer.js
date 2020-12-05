@@ -1,5 +1,4 @@
 import { pushIn, isNumber } from '../../core/util';
-import Size from '../../geo/Size';
 import Point from '../../geo/Point';
 import Canvas from '../../core/Canvas';
 import Geometry from '../../geometry/Geometry';
@@ -10,6 +9,29 @@ import Rectangle from '../../geometry/Rectangle';
 import Path from '../../geometry/Path';
 import LineString from '../../geometry/LineString';
 import Polygon from '../../geometry/Polygon';
+
+const TEMP_WITHIN = {
+    within: false,
+    center: [0, 0]
+};
+// bbox in pixel
+function isWithinPixel(painter) {
+    if (!painter || (!painter.__bbox)) {
+        TEMP_WITHIN.within = false;
+    } else {
+        TEMP_WITHIN.within = false;
+        const { minx, miny, maxx, maxy } = painter.__bbox;
+        const offsetx = Math.abs(maxx - minx);
+        const offsety = Math.abs(maxy - miny);
+        if (offsetx <= 1 && offsety <= 1) {
+            TEMP_WITHIN.within = true;
+            TEMP_WITHIN.center[0] = (minx + maxx) / 2;
+            TEMP_WITHIN.center[1] = (miny + maxy) / 2;
+        }
+        delete painter.__bbox;
+    }
+    return TEMP_WITHIN;
+}
 
 Geometry.include({
     _redrawWhenPitch: () => false,
@@ -26,7 +48,7 @@ const el = {
 
     _paintAsPath: function () {
         const map = this.getMap();
-        const altitude = this._getPainter().getAltitude();
+        const altitude = this.getAltitude();
         // when map is tilting, draw the circle/ellipse as a polygon by vertexes.
         return altitude > 0 || map.getPitch() || ((this instanceof Ellipse) && map.getBearing());
     },
@@ -38,8 +60,8 @@ const el = {
         }
         const pcenter = this._getPrjCoordinates();
         const pt = map._prjToPoint(pcenter, map.getGLZoom());
-        const size = this._getRenderSize();
-        return [pt, size['width'], size['height']];
+        const size = this._getRenderSize(pt);
+        return [pt, ...size];
     },
 
     _paintOn: function () {
@@ -50,13 +72,13 @@ const el = {
         }
     },
 
-    _getRenderSize() {
+    _getRenderSize(pt) {
         const map = this.getMap(),
             z = map.getGLZoom();
         const prjExtent = this._getPrjExtent();
         const pmin = map._prjToPoint(prjExtent.getMin(), z),
             pmax = map._prjToPoint(prjExtent.getMax(), z);
-        return new Size(Math.abs(pmax.x - pmin.x) / 2, Math.abs(pmax.y - pmin.y) / 2);
+        return [Math.abs(pmax.x - pmin.x) / 2, Math.abs(pmax.y - pt.y), Math.abs(pt.y - pmin.y)];
     }
 };
 
@@ -85,8 +107,8 @@ Sector.include(el, {
         }
         const map = this.getMap();
         const pt = map._prjToPoint(this._getPrjCoordinates(), map.getGLZoom());
-        const size = this._getRenderSize();
-        return [pt, size['width'],
+        const size = this._getRenderSize(pt);
+        return [pt, size[0],
             [this.getStartAngle(), this.getEndAngle()]
         ];
     },
@@ -157,7 +179,10 @@ LineString.include({
     },
 
     _paintOn(ctx, points, lineOpacity, fillOpacity, dasharray) {
-        if (this.options['smoothness']) {
+        const r = isWithinPixel(this._painter);
+        if (r.within) {
+            Canvas.pixelRect(ctx, r.center, lineOpacity, fillOpacity);
+        } else if (this.options['smoothness']) {
             Canvas.paintSmoothLine(ctx, points, lineOpacity, this.options['smoothness'], false, this._animIdx, this._animTailRatio);
         } else {
             Canvas.path(ctx, points, lineOpacity, null, dasharray);
@@ -281,7 +306,12 @@ Polygon.include({
     },
 
     _paintOn(ctx, points, lineOpacity, fillOpacity, dasharray) {
-        Canvas.polygon(ctx, points, lineOpacity, fillOpacity, dasharray, this.options['smoothness']);
+        const r = isWithinPixel(this._painter);
+        if (r.within) {
+            Canvas.pixelRect(ctx, r.center, lineOpacity, fillOpacity);
+        } else {
+            Canvas.polygon(ctx, points, lineOpacity, fillOpacity, dasharray, this.options['smoothness']);
+        }
     }
 });
 

@@ -13,14 +13,17 @@ import UIComponent from './UIComponent';
  * @property {Boolean} [options.draggable=false]  - if the marker can be dragged.
  * @property {Number}  [options.single=false]     - if the marker is a global single one.
  * @property {String|HTMLElement}  options.content - content of the marker, can be a string type HTML code or a HTMLElement.
+ * @property {Number}  [options.altitude=0] - altitude.
  * @memberOf ui.UIMarker
  * @instance
  */
 const options = {
-    'eventsPropagation' : true,
+    'containerClass': null,
+    'eventsPropagation': true,
     'draggable': false,
     'single': false,
-    'content': null
+    'content': null,
+    'altitude': 0
 };
 
 const domEvents =
@@ -249,6 +252,16 @@ class UIMarker extends Handlerable(UIComponent) {
         return this._markerCoord;
     }
 
+    //accord with isSupport for tooltip
+    getCenter() {
+        return this.getCoordinates();
+    }
+
+    // for infowindow
+    getAltitude() {
+        return this.options.altitude || 0;
+    }
+
     /**
      * Sets the content of the UIMarker
      * @param {String|HTMLElement} content - UIMarker's content
@@ -326,6 +339,9 @@ class UIMarker extends Handlerable(UIComponent) {
             dom.innerHTML = this.options['content'];
         } else {
             dom = this.options['content'];
+        }
+        if (this.options['containerClass']) {
+            dom.className = this.options['containerClass'];
         }
         this._registerDOMEvents(dom);
         return dom;
@@ -410,6 +426,18 @@ class UIMarker extends Handlerable(UIComponent) {
         ];
         return anchors;
     }
+
+    _getViewPoint() {
+        let alt = 0;
+        if (this._owner) {
+            const altitude = this.getAltitude();
+            if (altitude > 0) {
+                alt = this._meterToPoint(this._coordinate, altitude);
+            }
+        }
+        return this.getMap().coordToViewPoint(this._coordinate, undefined, alt)
+            ._add(this.options['dx'], this.options['dy']);
+    }
 }
 
 UIMarker.mergeOptions(options);
@@ -461,7 +489,7 @@ class UIMarkerDragHandler extends Handler {
     _prepareDragHandler() {
         this._dragHandler = new DragHandler(this.target.getDOM(), {
             'cancelOn': this._cancelOn.bind(this),
-            'ignoreMouseleave' : true
+            'ignoreMouseleave': true
         });
         this._dragHandler.on('mousedown', this._onMouseDown, this);
         this._dragHandler.on('dragging', this._dragging, this);

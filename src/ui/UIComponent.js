@@ -1,4 +1,4 @@
-import { extend, isFunction } from '../core/util';
+import { extend, isFunction, sign } from '../core/util';
 import { trim } from '../core/util/strings';
 import {
     on,
@@ -12,7 +12,6 @@ import {
 import Browser from '../core/Browser';
 import Class from '../core/Class';
 import Eventable from '../core/Eventable';
-import Point from '../geo/Point';
 import Size from '../geo/Size';
 import Geometry from '../geometry/Geometry';
 
@@ -383,8 +382,20 @@ class UIComponent extends Eventable(Class) {
     }
 
     _getViewPoint() {
-        return this.getMap().coordToViewPoint(this._coordinate)
+        let alt = 0;
+        if (this._owner && this._owner.getAltitude) {
+            const altitude = this._owner.getAltitude();
+            if (altitude > 0) {
+                alt = this._meterToPoint(this._coordinate, altitude);
+            }
+        }
+        return this.getMap().coordToViewPoint(this._coordinate, undefined, alt)
             ._add(this.options['dx'], this.options['dy']);
+    }
+
+    _meterToPoint(center, altitude) {
+        const map = this.getMap();
+        return map.distanceToPoint(altitude, 0, undefined, center).x * sign(altitude);
     }
 
     _autoPan() {
@@ -393,28 +404,37 @@ class UIComponent extends Eventable(Class) {
         if (map.isMoving()) {
             return;
         }
-        const point = this._pos;
-        const mapSize = map.getSize(),
-            mapWidth = mapSize['width'],
-            mapHeight = mapSize['height'];
+        const point = this._getViewPoint()._round();
+        const mapWidth = map.width;
+        const mapHeight = map.height;
 
-        const containerPoint = map.viewPointToContainerPoint(point);
-        const clientWidth = parseInt(dom.clientWidth),
-            clientHeight = parseInt(dom.clientHeight);
+        const containerPoint0 = map.viewPointToContainerPoint(point);
+        const offset = this.getOffset();
+        const containerPoint = containerPoint0.add(offset);
+
+        const prjCoord = map._viewPointToPrj(point);
+        const domWidth = parseInt(dom.clientWidth);
+        const domHeight = parseInt(dom.clientHeight);
+        const margin = 50;
         let left = 0,
             top = 0;
         if ((containerPoint.x) < 0) {
-            left = -(containerPoint.x - clientWidth / 2);
-        } else if ((containerPoint.x + clientWidth - 35) > mapWidth) {
-            left = (mapWidth - (containerPoint.x + clientWidth * 3 / 2));
+            left = -containerPoint.x + margin;
+        } else if ((containerPoint.x + domWidth) > mapWidth) {
+            left = -((containerPoint.x + domWidth) - mapWidth) - margin;
         }
-        if (containerPoint.y - clientHeight < 0) {
-            top = -(containerPoint.y - clientHeight) + 50;
-        } else if (containerPoint.y > mapHeight) {
-            top = (mapHeight - containerPoint.y - clientHeight) - 30;
+        if (containerPoint.y < 0) {
+            top = -(containerPoint.y) + margin;
+        } else if (containerPoint.y + domHeight > mapHeight) {
+            top = (mapHeight - (containerPoint.y + domHeight)) - margin;
         }
+
         if (top !== 0 || left !== 0) {
-            map.panBy(new Point(left, top), { 'duration': this.options['autoPanDuration'] });
+            const newContainerPoint = containerPoint0.add(left, top);
+            const t = map._containerPointToPoint(newContainerPoint)._sub(map._prjToPoint(map._getPrjCenter()));
+            const target = map._pointToPrj(map._prjToPoint(prjCoord).sub(t));
+            // map.panBy(new Point(left, top), { 'duration': this.options['autoPanDuration'] });
+            map._panAnimation(target);
         }
     }
 
@@ -525,7 +545,8 @@ class UIComponent extends Eventable(Class) {
         return {
             'zooming rotate pitch': this.onEvent,
             'zoomend': this.onZoomEnd,
-            'moving': this.onMoving
+            'moving': this.onMoving,
+            'resize': this.onResize
         };
     }
 
@@ -561,6 +582,13 @@ class UIComponent extends Eventable(Class) {
     onZoomEnd() {
         if (this.isVisible()) {
             // when zoomend, map container is reset, position should be updated in current frame
+            this._setPosition();
+        }
+    }
+
+    onResize() {
+        if (this.isVisible()) {
+            //when map resize , update position
             this._setPosition();
         }
     }

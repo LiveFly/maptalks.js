@@ -22,6 +22,9 @@ let hitTesting = false;
 
 let TEMP_CANVAS = null;
 
+const RADIAN = Math.PI / 180;
+const textOffsetY = 1;
+
 const Canvas = {
     setHitTesting(testing) {
         hitTesting = testing;
@@ -337,7 +340,7 @@ const Canvas = {
             ctx.lineCap = 'round';
             ctx.lineWidth = textHaloRadius * 2;
             ctx.strokeStyle = textHaloFill;
-            ctx.strokeText(text, Math.round(pt.x), Math.round(pt.y));
+            ctx.strokeText(text, pt.x, pt.y + textOffsetY);
             ctx.miterLimit = 10; //default
 
             ctx.globalAlpha = alpha;
@@ -368,7 +371,7 @@ const Canvas = {
         if (rgba) {
             ctx.fillStyle = rgba;
         }
-        ctx.fillText(text, Math.round(pt.x), Math.round(pt.y));
+        ctx.fillText(text, pt.x, pt.y + textOffsetY);
     },
 
     _stroke(ctx, strokeOpacity, x, y) {
@@ -606,15 +609,15 @@ const Canvas = {
             const u0 = 1.0 - t0;
             const u1 = 1.0 - t1;
 
-            const qxa =  x1 * u0 * u0 + bx1 * 2 * t0 * u0 + bx2 * t0 * t0;
-            const qxb =  x1 * u1 * u1 + bx1 * 2 * t1 * u1 + bx2 * t1 * t1;
-            const qxc = bx1 * u0 * u0 + bx2 * 2 * t0 * u0 +  x2 * t0 * t0;
-            const qxd = bx1 * u1 * u1 + bx2 * 2 * t1 * u1 +  x2 * t1 * t1;
+            const qxa = x1 * u0 * u0 + bx1 * 2 * t0 * u0 + bx2 * t0 * t0;
+            const qxb = x1 * u1 * u1 + bx1 * 2 * t1 * u1 + bx2 * t1 * t1;
+            const qxc = bx1 * u0 * u0 + bx2 * 2 * t0 * u0 + x2 * t0 * t0;
+            const qxd = bx1 * u1 * u1 + bx2 * 2 * t1 * u1 + x2 * t1 * t1;
 
-            const qya =  y1 * u0 * u0 + by1 * 2 * t0 * u0 + by2 * t0 * t0;
-            const qyb =  y1 * u1 * u1 + by1 * 2 * t1 * u1 + by2 * t1 * t1;
-            const qyc = by1 * u0 * u0 + by2 * 2 * t0 * u0 +  y2 * t0 * t0;
-            const qyd = by1 * u1 * u1 + by2 * 2 * t1 * u1 +  y2 * t1 * t1;
+            const qya = y1 * u0 * u0 + by1 * 2 * t0 * u0 + by2 * t0 * t0;
+            const qyb = y1 * u1 * u1 + by1 * 2 * t1 * u1 + by2 * t1 * t1;
+            const qyc = by1 * u0 * u0 + by2 * 2 * t0 * u0 + y2 * t0 * t0;
+            const qyd = by1 * u1 * u1 + by2 * 2 * t1 * u1 + y2 * t1 * t1;
 
             // const xa = qxa * u0 + qxc * t0;
             const xb = qxa * u1 + qxc * t1;
@@ -749,7 +752,7 @@ const Canvas = {
             p1p2 = Math.PI - p1p2;
         }
         //angle between circle center and p2
-        const cp2 = 90 * Math.PI / 180 - a / 2,
+        const cp2 = 90 * RADIAN - a / 2,
             da = p1p2 - cp2;
 
         const dx = Math.cos(da) * r,
@@ -789,29 +792,36 @@ const Canvas = {
 
 
     //各种图形的绘制方法
-    ellipse(ctx, pt, width, height, lineOpacity, fillOpacity) {
-        function bezierEllipse(x, y, a, b) {
+    ellipse(ctx, pt, width, heightTop, heightBottom, lineOpacity, fillOpacity) {
+        function bezierEllipse(x, y, a, b, b1) {
             const k = 0.5522848,
                 ox = a * k,
-                oy = b * k;
+                oy = b * k,
+                oy1 = b1 * k;
             ctx.moveTo(x - a, y);
             ctx.bezierCurveTo(x - a, y - oy, x - ox, y - b, x, y - b);
             ctx.bezierCurveTo(x + ox, y - b, x + a, y - oy, x + a, y);
-            ctx.bezierCurveTo(x + a, y + oy, x + ox, y + b, x, y + b);
-            ctx.bezierCurveTo(x - ox, y + b, x - a, y + oy, x - a, y);
+            ctx.bezierCurveTo(x + a, y + oy1, x + ox, y + b1, x, y + b1);
+            ctx.bezierCurveTo(x - ox, y + b1, x - a, y + oy1, x - a, y);
             ctx.closePath();
         }
         ctx.beginPath();
-        if (width === height) {
+        if (width === heightTop && width === heightBottom) {
             ctx.arc(pt.x, pt.y, width, 0, 2 * Math.PI);
         } else if (ctx.ellipse) {
-            ctx.ellipse(pt.x, pt.y, width, height, 0, 0, Math.PI / 180 * 360);
+            if (heightTop !== heightBottom) {
+                // the order is clockwise
+                ctx.ellipse(pt.x, pt.y, width, heightTop, 0, RADIAN * 180, RADIAN * 360, false);
+                ctx.ellipse(pt.x, pt.y, width, heightBottom, 0, 0, RADIAN * 180, false);
+            } else {
+                ctx.ellipse(pt.x, pt.y, width, heightTop, 0, 0, RADIAN * 360, false);
+            }
         } else {
             // IE
-            bezierEllipse(pt.x, pt.y, width, height);
+            bezierEllipse(pt.x, pt.y, width, heightTop, heightBottom);
         }
-        Canvas.fillCanvas(ctx, fillOpacity, pt.x - width, pt.y - height);
-        Canvas._stroke(ctx, lineOpacity, pt.x - width, pt.y - height);
+        Canvas.fillCanvas(ctx, fillOpacity, pt.x - width, pt.y - heightTop);
+        Canvas._stroke(ctx, lineOpacity, pt.x - width, pt.y - heightTop);
     },
 
     rectangle(ctx, pt, size, lineOpacity, fillOpacity) {
@@ -824,7 +834,7 @@ const Canvas = {
     },
 
     sector(ctx, pt, size, angles, lineOpacity, fillOpacity) {
-        const rad = Math.PI / 180;
+        const rad = RADIAN;
         const startAngle = angles[0],
             endAngle = angles[1];
 
@@ -863,6 +873,31 @@ const Canvas = {
         target.height = canvas.height;
         target.getContext('2d').drawImage(canvas, 0, 0);
         return target;
+    },
+
+    // pixel render
+    pixelRect(ctx, point, lineOpacity, fillOpacity) {
+        const lineWidth = ctx.lineWidth;
+        const alpha = ctx.globalAlpha;
+        if (lineWidth > 0 && lineOpacity > 0) {
+            if (ctx.fillStyle !== ctx.strokeStyle) {
+                ctx.fillStyle = ctx.strokeStyle;
+            }
+            if (lineOpacity < 1) {
+                ctx.globalAlpha *= lineOpacity;
+            }
+        } else if (fillOpacity > 0) {
+            if (fillOpacity < 1) {
+                ctx.globalAlpha *= fillOpacity;
+            }
+        } else {
+            return;
+        }
+        ctx.canvas._drawn = true;
+        ctx.fillRect(point[0], point[1], 1, 1);
+        if (ctx.globalAlpha !== alpha) {
+            ctx.globalAlpha = alpha;
+        }
     }
 };
 
