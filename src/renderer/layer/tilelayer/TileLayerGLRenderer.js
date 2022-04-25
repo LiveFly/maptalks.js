@@ -1,6 +1,9 @@
 import TileLayer from '../../../layer/tile/TileLayer';
 import TileLayerCanvasRenderer from './TileLayerCanvasRenderer';
 import ImageGLRenderable from '../ImageGLRenderable';
+import Point from '../../../geo/Point';
+
+const TILE_POINT = new Point(0, 0);
 
 /**
  * @classdesc
@@ -32,9 +35,9 @@ class TileLayerGLRenderer extends ImageGLRenderable(TileLayerCanvasRenderer) {
             return;
         }
 
-        const scale = tileInfo._glScale = tileInfo._glScale || map.getGLScale(tileInfo.z),
-            w = tileInfo.size[0],
-            h = tileInfo.size[1];
+        const scale = tileInfo._glScale = tileInfo._glScale || map.getGLScale(tileInfo.z);
+        const w = tileInfo.extent2d.xmax - tileInfo.extent2d.xmin;
+        const h = tileInfo.extent2d.ymax - tileInfo.extent2d.ymin;
         if (tileInfo.cache !== false) {
             this._bindGLBuffer(tileImage, w, h);
         }
@@ -43,7 +46,8 @@ class TileLayerGLRenderer extends ImageGLRenderable(TileLayerCanvasRenderer) {
             super.drawTile(tileInfo, tileImage);
             return;
         }
-        const point = tileInfo.point;
+        const { extent2d, offset } = tileInfo;
+        const point = TILE_POINT.set(extent2d.xmin - offset[0], tileInfo.extent2d.ymax - offset[1]);
         const x = point.x * scale,
             y = point.y * scale;
         const opacity = this.getTileOpacity(tileImage);
@@ -167,5 +171,4 @@ class TileLayerGLRenderer extends ImageGLRenderable(TileLayerCanvasRenderer) {
 TileLayer.registerRenderer('gl', TileLayerGLRenderer);
 
 export default TileLayerGLRenderer;
-
 

@@ -60,6 +60,27 @@ describe('Geometry.Marker', function () {
         expect(size.height).to.be.above(0);
     });
 
+    it('updateSize', function () {
+        var marker = new maptalks.Marker(map.getCenter(), {
+            symbol: [{
+                'markerType': 'ellipse',
+                'markerWidth': 20,
+                'markerHeight': 30,
+            }]
+        });
+        layer.addGeometry(marker);
+        var size = marker.getSize();
+
+        marker.updateSymbol([{
+            markerWidth: 10,
+            markerHeight: 15
+        }]);
+
+        size = marker.getSize();
+        expect(size.width).to.be.eql(12);
+        expect(size.height).to.be.eql(17);
+    });
+
     it('show/hide/isVisible', function () {
         var marker = new maptalks.Marker({ x: 0, y: 0 });
         layer.addGeometry(marker);
@@ -136,10 +157,24 @@ describe('Geometry.Marker', function () {
                 } else {
                     expect(layer).to.be.painted(0, -1);
                 }
-                expect(marker.getSize().toArray()).to.be.eql([11, 21]);
+                expect(marker.getSize().toArray()).to.be.eql([12, 22]);
                 map.removeLayer(layer);
             }
         });
+
+        it('can be vector with undefined size', function (done) {
+                var marker = new maptalks.Marker(center, {
+                    symbol: {
+                        markerType: 'ellipse'
+                    }
+                });
+                layer.once('layerload', function () {
+                    expect(layer).to.be.painted(0, 0);
+                    done();
+                });
+                layer.addGeometry(marker);
+                expect(marker.getSize().toArray()).to.be.eql([12, 12]);
+            });
 
         context('image marker with alignment', function () {
             it('bottom-right', function (done) {
@@ -249,7 +284,7 @@ describe('Geometry.Marker', function () {
                     done();
                 });
                 layer.addGeometry(marker);
-                expect(marker.getSize().toArray()).to.be.eql([11, 21]);
+                expect(marker.getSize().toArray()).to.be.eql([12, 22]);
             });
 
             it('pin', function (done) {
@@ -268,7 +303,7 @@ describe('Geometry.Marker', function () {
                     done();
                 });
                 layer.addGeometry(marker);
-                expect(marker.getSize().toArray()).to.be.eql([11, 21]);
+                expect(marker.getSize().toArray()).to.be.eql([12, 22]);
             });
 
             it('rectangle', function (done) {
@@ -282,12 +317,12 @@ describe('Geometry.Marker', function () {
                     }
                 });
                 layer.once('layerload', function () {
-                    expect(layer).to.be.painted(-5, -11);
-                    expect(layer).to.be.painted(5, 9);
+                    expect(layer).to.be.painted(-5, -10);
+                    expect(layer).not.to.be.painted(5, 9);
                     done();
                 });
                 layer.addGeometry(marker);
-                expect(marker.getSize().toArray()).to.be.eql([11, 21]);
+                expect(marker.getSize().toArray()).to.be.eql([12, 22]);
             });
         });
 
@@ -420,6 +455,27 @@ describe('Geometry.Marker', function () {
             done();
         });
         map.addLayer(layer);
+    });
+
+    it('vector marker size with shadowBlur', function () {
+        var marker = new maptalks.Marker(map.getCenter(), {
+            symbol : {
+                markerType : 'ellipse',
+                markerWidth : 40,
+                markerHeight : 40,
+                shadowBlur: 20
+            }
+        });
+        var layer = new maptalks.VectorLayer('id', { 'drawImmediate' : true }).addTo(map);
+        layer.addGeometry([marker]);
+        var size = marker.getSize();
+        expect(size.width).to.be.above(60);
+        expect(size.height).to.be.above(60);
+
+
+        var fixedExtent = marker._getPainter().getFixedExtent();
+        expect(fixedExtent.getWidth()).to.be.above(60);
+        expect(fixedExtent.getHeight()).to.be.above(60);
     });
 
     describe('function type symbols', function () {

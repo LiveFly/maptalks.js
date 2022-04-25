@@ -21,7 +21,7 @@ describe('SpatialReference.Update', function () {
     it('SpatialReference update with resolutions', function () {
         var res = Math.pow(2, 18);
         var resolutions = [];
-        for (var i = 0; i < 23; i++) {
+        for (var i = 0; i < 25; i++) {
             resolutions[i] = res;
             res *= 0.5;
         }
@@ -29,9 +29,9 @@ describe('SpatialReference.Update', function () {
             projection: 'baidu',
             resolutions: resolutions
         };
-        expect(map.getMaxZoom()).to.be.eql(20);
-        map.setSpatialReference(spatialReference);
         expect(map.getMaxZoom()).to.be.eql(22);
+        map.setSpatialReference(spatialReference);
+        expect(map.getMaxZoom()).to.be.eql(24);
     });
 
     it('SpatialReference.TileLayer', function (done) {
@@ -44,13 +44,15 @@ describe('SpatialReference.Update', function () {
             });
             var tiles = tileLayer.getTiles().tileGrids[0].tiles;
             var tile = tiles[tiles.length - 1];
-            expect(tile.point.toArray()).to.be.eql([-256, 256]);
+            expect(tile.extent2d.xmin).to.be.eql(-256);
+            expect(tile.extent2d.ymax).to.be.eql(0);
             done();
         });
         map.setBaseLayer(tileLayer);
         var tiles = tileLayer.getTiles().tileGrids[0].tiles;
         var tile = tiles[tiles.length - 1];
-        expect(tile.point.toArray()).to.be.eql([-256, 256]);
+        expect(tile.extent2d.xmin).to.be.eql(-256);
+        expect(tile.extent2d.ymax).to.be.eql(256);
     });
 
     var geometries = GEN_GEOMETRIES_OF_ALL_TYPES();

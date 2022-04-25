@@ -335,9 +335,9 @@ describe('Map.Spec', function () {
             var zoom = map.getZoom();
             var w = extent.getWidth(),
                 h = extent.getHeight();
-            var fitZoom = map.getFitZoom(new maptalks.Extent(extent.min + w / 4, extent.ymin + h / 4, extent.xmax - w / 4, extent.ymax - h / 4));
+            var fitZoom = map.getFitZoom(new maptalks.Extent(extent.xmin + w / 4, extent.ymin + h / 4, extent.xmax - w / 4, extent.ymax - h / 4));
 
-            expect(fitZoom).to.eql(zoom + 3);
+            expect(fitZoom).to.eql(zoom + 1);
         });
 
         it('getFitZoom return fractional', function () {
@@ -435,6 +435,18 @@ describe('Map.Spec', function () {
             }, {
                 duration: 30
             });
+        });
+
+        it('initial center is not in maxExtent', function () {
+            map.remove();
+
+            map = new maptalks.Map(container, {
+                center: [1, 1],
+                maxExtent: [2, 5, 4, 7]
+            });
+            var newCenter = map.getCenter().toArray();
+            newCenter[1] = Math.round(newCenter[1]);
+            expect(newCenter).to.be.eql([3, 6]);
         });
     });
 
@@ -553,9 +565,13 @@ describe('Map.Spec', function () {
                     expect(map.getCenter().toArray()).to.be.eql(center.toArray());
                     done();
                 });
-                container.style.display = '';
+                setTimeout(function () {
+                    container.style.display = '';
+                }, 17);
             });
-            container.style.display = 'none';
+            setTimeout(function () {
+                container.style.display = 'none';
+            }, 17);
         });
 
         it('event properties', function (done) {
@@ -868,5 +884,15 @@ describe('Map.Spec', function () {
         map = new maptalks.Map(container, option);
         map.coordToContainerPoint(center);
         map.containerPointToCoord(new maptalks.Point(0, 0));
+    });
+
+    it('#isOffScreen', function () {
+        expect(map.isOffscreen([0, 0, 10, 10])).not.to.be.ok();
+        expect(map.isOffscreen(new maptalks.PointExtent(0, 0, 10, 10))).not.to.be.ok();
+        expect(map.isOffscreen([100, 0, 110, 10])).to.be.ok();
+        expect(map.isOffscreen(new maptalks.PointExtent(100, 0, 110, 10))).to.be.ok();
+        expect(map.isOffscreen([-100, 0, -30, 10])).to.be.ok();
+        expect(map.isOffscreen([0, 100, 10, 110])).to.be.ok();
+        expect(map.isOffscreen([0, -110, 10, -100])).to.be.ok();
     });
 });

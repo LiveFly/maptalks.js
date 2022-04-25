@@ -1,4 +1,4 @@
-import { isString, flash } from '../core/util';
+import { isString, flash, isNil, extend, isFunction } from '../core/util';
 import { on, off, createEl, stopPropagation } from '../core/util/dom';
 import Browser from '../core/Browser';
 import Handler from '../handler/Handler';
@@ -14,6 +14,8 @@ import UIComponent from './UIComponent';
  * @property {Number}  [options.single=false]     - if the marker is a global single one.
  * @property {String|HTMLElement}  options.content - content of the marker, can be a string type HTML code or a HTMLElement.
  * @property {Number}  [options.altitude=0] - altitude.
+ * @property {Number}  [options.minZoom=0] - the minimum zoom to display .
+ * @property {Number}  [options.maxZoom=null] - the maximum zoom to display.
  * @memberOf ui.UIMarker
  * @instance
  */
@@ -23,7 +25,9 @@ const options = {
     'draggable': false,
     'single': false,
     'content': null,
-    'altitude': 0
+    'altitude': 0,
+    'minZoom': 0,
+    'maxZoom': null
 };
 
 const domEvents =
@@ -334,9 +338,16 @@ class UIMarker extends Handlerable(UIComponent) {
      */
     buildOn() {
         let dom;
-        if (isString(this.options['content'])) {
+        const content = this.options['content'];
+        const isStr = isString(content);
+        if (isStr || isFunction(content)) {
             dom = createEl('div');
-            dom.innerHTML = this.options['content'];
+            if (isStr) {
+                dom.innerHTML = this.options['content'];
+            } else {
+                //dymatic render dom content
+                content.bind(this)(dom);
+            }
         } else {
             dom = this.options['content'];
         }
@@ -437,6 +448,47 @@ class UIMarker extends Handlerable(UIComponent) {
         }
         return this.getMap().coordToViewPoint(this._coordinate, undefined, alt)
             ._add(this.options['dx'], this.options['dy']);
+    }
+
+    _getDefaultEvents() {
+        return extend({}, super._getDefaultEvents(), { 'zooming zoomend': this.onZoomFilter });
+    }
+
+    _setPosition() {
+        //show/hide zoomFilter
+        this.onZoomFilter();
+        super._setPosition();
+    }
+
+    onZoomFilter() {
+        const dom = this.getDOM();
+        if (!dom) return;
+        if (!this.isVisible() && dom.style.display !== 'none') {
+            dom.style.display = 'none';
+        } else if (this.isVisible() && dom.style.display === 'none') {
+            dom.style.display = '';
+        }
+    }
+
+    isVisible() {
+        const map = this.getMap();
+        if (!map) {
+            return false;
+        }
+        if (!this.options['visible']) {
+            return false;
+        }
+        const zoom = map.getZoom();
+        const { minZoom, maxZoom } = this.options;
+        if (!isNil(minZoom) && zoom < minZoom || (!isNil(maxZoom) && zoom > maxZoom)) {
+            return false;
+        }
+        const dom = this.getDOM();
+        return dom && true;
+    }
+
+    isSupportZoomFilter() {
+        return true;
     }
 }
 

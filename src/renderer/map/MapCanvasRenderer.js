@@ -1,10 +1,11 @@
-import { IS_NODE, isNumber, isFunction, requestAnimFrame, cancelAnimFrame, equalMapView } from '../../core/util';
+import { IS_NODE, isNumber, isFunction, requestAnimFrame, cancelAnimFrame, equalMapView, calCanvasSize } from '../../core/util';
 import { createEl, preventSelection, computeDomPosition, addDomEvent, removeDomEvent } from '../../core/util/dom';
 import Browser from '../../core/Browser';
 import Point from '../../geo/Point';
 import Canvas2D from '../../core/Canvas';
 import MapRenderer from './MapRenderer';
 import Map from '../../map/Map';
+import { getGlobalWorkerPool } from '../../core/worker/WorkerPool';
 
 /**
  * @classdesc
@@ -36,17 +37,21 @@ class MapCanvasRenderer extends MapRenderer {
      * @return {Boolean} return false to cease frame loop
      */
     renderFrame(framestamp) {
-        if (!this.map) {
+        if (!this.map || !this.map.options['renderable']) {
             return false;
         }
+        this._updateDomPosition(framestamp);
         delete this._isViewChanged;
         const map = this.map;
         map._fireEvent('framestart');
         this.updateMapDOM();
+        map.clearCollisionIndex();
         const layers = this._getAllLayerToRender();
         this.drawLayers(layers, framestamp);
         const updated = this.drawLayerCanvas(layers);
         if (updated) {
+            // when updated is false, should escape drawing tops and centerCross to keep handle's alpha
+            this.drawTops();
             this._drawCenterCross();
         }
         // this._drawContainerExtent();
@@ -348,15 +353,17 @@ class MapCanvasRenderer extends MapRenderer {
             }
         }
 
+        const targetWidth = this.canvas.width;
+        const targetHeight = this.canvas.height;
         if (baseLayerImage) {
-            this._drawLayerCanvasImage(baseLayerImage[0], baseLayerImage[1]);
+            this._drawLayerCanvasImage(baseLayerImage[0], baseLayerImage[1], targetWidth, targetHeight);
             this._drawFog();
         }
 
         len = images.length;
         const start = interacting && limit >= 0 && len > limit ? len - limit : 0;
         for (let i = start; i < len; i++) {
-            this._drawLayerCanvasImage(images[i][0], images[i][1]);
+            this._drawLayerCanvasImage(images[i][0], images[i][1], targetWidth, targetHeight);
         }
 
         /**
@@ -593,7 +600,11 @@ class MapCanvasRenderer extends MapRenderer {
             this._cancelFrameLoop();
             return;
         }
+        framestamp = framestamp || 0;
+        this._frameTimestamp = framestamp;
+        this._resizeCount = 0;
         this.renderFrame(framestamp);
+        getGlobalWorkerPool().commit();
         // Keep registering ourselves for the next animation frame
         this._animationFrame = requestAnimFrame((framestamp) => { this._frameLoop(framestamp); });
     }
@@ -604,7 +615,7 @@ class MapCanvasRenderer extends MapRenderer {
         }
     }
 
-    _drawLayerCanvasImage(layer, layerImage) {
+    _drawLayerCanvasImage(layer, layerImage, targetWidth, targetHeight) {
         const ctx = this.context;
         const point = layerImage['point'].round();
         const dpr = this.map.getDevicePixelRatio();
@@ -663,7 +674,7 @@ class MapCanvasRenderer extends MapRenderer {
                 point.x + 18, point.y + 18);
         }*/
 
-        ctx.drawImage(canvasImage, 0, 0, width, height, point.x, point.y, width, height);
+        ctx.drawImage(canvasImage, 0, 0, width, height, point.x, point.y, targetWidth, targetHeight);
         if (matrix) {
             ctx.restore();
         }
@@ -758,22 +769,27 @@ class MapCanvasRenderer extends MapRenderer {
             mapSize = map.getSize(),
             canvas = this.canvas,
             r = map.getDevicePixelRatio();
-        if (mapSize['width'] * r === canvas.width && mapSize['height'] * r === canvas.height) {
+        // width/height不变并不意味着 css width/height 不变
+        const { width, height, cssWidth, cssHeight } = calCanvasSize(mapSize, r);
+        if (canvas.style && (canvas.style.width !== cssWidth || canvas.style.height !== cssHeight)) {
+            canvas.style.width = cssWidth;
+            canvas.style.height = cssHeight;
+        }
+        if (width === canvas.width && height === canvas.height) {
             return false;
         }
         //retina屏支持
 
-        canvas.height = r * mapSize['height'];
-        canvas.width = r * mapSize['width'];
-        if (canvas.style) {
-            canvas.style.width = mapSize['width'] + 'px';
-            canvas.style.height = mapSize['height'] + 'px';
-        }
-
+        canvas.height = height;
+        canvas.width = width;
+        this.topLayer.width = canvas.width;
+        this.topLayer.height = canvas.height;
         return true;
     }
 
     createCanvas() {
+        this.topLayer = createEl('canvas');
+        this.topCtx = this.topLayer.getContext('2d');
         if (this._containerIsCanvas) {
             this.canvas = this.map._containerDOM;
         } else {
@@ -784,26 +800,60 @@ class MapCanvasRenderer extends MapRenderer {
         this.context = this.canvas.getContext('2d');
     }
 
+    _updateDomPosition(framestamp) {
+        if (this._checkPositionTime === undefined) {
+            this._checkPositionTime = -Infinity;
+        }
+        const dTime = Math.abs(framestamp - this._checkPositionTime);
+        if (dTime >= 500) {
+            // refresh map's dom position
+            computeDomPosition(this.map._containerDOM);
+            this._checkPositionTime = Math.min(framestamp, this._checkPositionTime);
+        }
+        return this;
+    }
+
     _checkSize() {
-        if (!this.map || this.map.isInteracting()) {
+        if (!this.map) {
             return;
         }
-        // refresh map's dom position
-        computeDomPosition(this.map._containerDOM);
         this.map.checkSize();
     }
 
     _setCheckSizeInterval(interval) {
-        clearInterval(this._resizeInterval);
-        this._checkSizeInterval = interval;
-        this._resizeInterval = setInterval(() => {
-            if (!this.map || this.map.isRemoved()) {
-                //is deleted
-                clearInterval(this._resizeInterval);
-            } else {
-                this._checkSize();
+        // ResizeObserver priority of use
+        // https://developer.mozilla.org/zh-CN/docs/Web/API/ResizeObserver
+        if (Browser.resizeObserver) {
+            if (this._resizeObserver) {
+                this._resizeObserver.disconnect();
             }
-        }, this._checkSizeInterval);
+            if (this.map) {
+                // eslint-disable-next-line no-unused-vars
+                this._resizeObserver = new ResizeObserver((entries) => {
+                    if (!this.map || this.map.isRemoved()) {
+                        this._resizeObserver.disconnect();
+                    } else if (entries.length) {
+                        this.map._containerDomContentRect = entries[0].contentRect;
+                        this._checkSize(entries[0].contentRect);
+                        this._resizeCount = this._resizeCount || 0;
+                        //force render all layers,这两句代码不能颠倒，因为要先重置所有图层的size，才能正确的渲染所有图层
+                        this.renderFrame((this._frameTimestamp || 0) + (++this._resizeCount) / 100);
+                    }
+                });
+                this._resizeObserver.observe(this.map._containerDOM);
+            }
+        } else {
+            clearInterval(this._resizeInterval);
+            this._checkSizeInterval = interval;
+            this._resizeInterval = setInterval(() => {
+                if (!this.map || this.map.isRemoved()) {
+                    //is deleted
+                    clearInterval(this._resizeInterval);
+                } else {
+                    this._checkSize();
+                }
+            }, this._checkSizeInterval);
+        }
     }
 
     _registerEvents() {
@@ -839,6 +889,9 @@ class MapCanvasRenderer extends MapRenderer {
         if (Browser.webgl && typeof document !== 'undefined') {
             addDomEvent(document, 'visibilitychange', this._thisVisibilitychange, this);
         }
+        if (Browser.addDPRListening) {
+            Browser.addDPRListening(this.map);
+        }
     }
 
     _onMapMouseMove(param) {
@@ -863,6 +916,47 @@ class MapCanvasRenderer extends MapRenderer {
             return;
         }
         this.setToRedraw();
+    }
+
+    //----------- top elements methods -------------
+    // edit handles or edit outlines
+    addTopElement(e) {
+        if (!this._tops) {
+            this._tops = [];
+        }
+        this._tops.push(e);
+    }
+
+    removeTopElement(e) {
+        if (!this._tops) {
+            return;
+        }
+        const idx = this._tops.indexOf(e);
+        if (idx >= 0) {
+            this._tops.splice(idx, 1);
+        }
+    }
+
+    getTopElements() {
+        return this._tops || [];
+    }
+
+    drawTops() {
+        // clear topLayer
+        this.topCtx.clearRect(0, 0, this.topLayer.width, this.topLayer.height);
+        this.map.fire('drawtopstart');
+        this.map.fire('drawtops');
+        const tops = this.getTopElements();
+        let updated = false;
+        for (let i = 0; i < tops.length; i++) {
+            if (tops[i].render(this.topCtx)) {
+                updated = true;
+            }
+        }
+        if (updated) {
+            this.context.drawImage(this.topLayer, 0, 0);
+        }
+        this.map.fire('drawtopsend');
     }
 }
 

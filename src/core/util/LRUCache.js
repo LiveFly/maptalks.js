@@ -1,12 +1,13 @@
+const isMapSupported = typeof Map === 'function';
 /**
  * from mapbox-gl-js
  * A [least-recently-used cache](http://en.wikipedia.org/wiki/Cache_algorithms)
  * with hash lookup made possible by keeping a list of keys in parallel to
  * an array of dictionary of values
  *
- * @private
+ * @public
  */
-class LRUCache {
+class ArrayLRUCache {
     /**
      * @param {number} max number of permitted values
      * @param {Function} onRemove callback called with items when they expire
@@ -21,7 +22,6 @@ class LRUCache {
      * Clear the cache
      *
      * @returns {LRUCache} this cache
-     * @private
      */
     reset() {
         for (const key in this.data) {
@@ -47,7 +47,6 @@ class LRUCache {
      * @param {*} data any value
      *
      * @returns {LRUCache} this cache
-     * @private
      */
     add(key, data) {
 
@@ -74,7 +73,6 @@ class LRUCache {
      *
      * @param {String} key the key to be looked-up
      * @returns {Boolean} whether the cache has this value
-     * @private
      */
     has(key) {
         return key in this.data;
@@ -84,7 +82,6 @@ class LRUCache {
      * List all keys in the cache
      *
      * @returns {Array<string>} an array of keys in this cache.
-     * @private
      */
     keys() {
         return this.order;
@@ -96,7 +93,6 @@ class LRUCache {
      *
      * @param {string} key the key to look up
      * @returns {*} the data, or null if it isn't found
-     * @private
      */
     getAndRemove(key) {
         if (!this.has(key)) { return null; }
@@ -115,7 +111,6 @@ class LRUCache {
      *
      * @param {string} key the key to look up
      * @returns {*} the data, or null if it isn't found
-     * @private
      */
     get(key) {
         if (!this.has(key)) { return null; }
@@ -129,7 +124,6 @@ class LRUCache {
      *
      * @param {string} key the key for the pair to delete
      * @returns {LRUCache} this cache
-     * @private
      */
     remove(key) {
         if (!this.has(key)) { return this; }
@@ -147,7 +141,6 @@ class LRUCache {
      *
      * @param {number} max the max size of the cache
      * @returns {LRUCache} this cache
-     * @private
      */
     setMaxSize(max) {
         this.max = max;
@@ -160,5 +153,116 @@ class LRUCache {
         return this;
     }
 }
+
+let MapLRUCache;
+
+if (isMapSupported) {
+    MapLRUCache = class {
+        constructor(max, onRemove) {
+            this.max = max;
+            this.onRemove = onRemove;
+            this.reset();
+        }
+
+        reset() {
+            if (this.data) {
+                const values = this.data.values();
+                for (const p of values) {
+                    this.onRemove(p);
+                }
+            }
+
+            this.data = new Map();
+            return this;
+        }
+
+        clear() {
+            this.reset();
+            delete this.onRemove;
+        }
+
+        add(key, data) {
+            if (!data) {
+                return this;
+            }
+            if (this.has(key)) {
+                this.data.delete(key);
+                this.data.set(key, data);
+                if (this.data.size > this.max) {
+                    this.shrink();
+                }
+            } else {
+                this.data.set(key, data);
+            }
+
+            return this;
+        }
+
+        keys() {
+            const keys = new Array(this.data.size);
+            let i = 0;
+            const iterator = this.data.keys();
+            for (const k of iterator) {
+                keys[i++] = k;
+            }
+            return keys;
+        }
+
+
+        shrink() {
+            const iterator = this.data.keys();
+            let item = iterator.next();
+            while (this.data.size > this.max) {
+                const removedData = this.getAndRemove(item.value);
+                if (removedData) {
+                    this.onRemove(removedData);
+                }
+                item = iterator.next();
+            }
+        }
+
+        has(key) {
+            return this.data.has(key);
+        }
+
+
+        getAndRemove(key) {
+            if (!this.has(key)) { return null; }
+
+            const data = this.data.get(key);
+            this.data.delete(key);
+            return data;
+        }
+
+
+        get(key) {
+            if (!this.has(key)) { return null; }
+
+            const data = this.data.get(key);
+            return data;
+        }
+
+        remove(key) {
+            if (!this.has(key)) { return this; }
+
+            const data = this.data.get(key);
+            this.data.delete(key);
+            this.onRemove(data);
+
+            return this;
+        }
+
+        setMaxSize(max) {
+            this.max = max;
+            if (this.data.size > this.max) {
+                this.shrink();
+            }
+            return this;
+        }
+    };
+}
+
+
+const LRUCache = isMapSupported ? MapLRUCache : ArrayLRUCache;
 
 export default LRUCache;

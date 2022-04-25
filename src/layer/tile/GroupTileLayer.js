@@ -1,10 +1,14 @@
 import { pushIn } from '../../core/util';
 import Layer from '../Layer';
 import TileLayer from './TileLayer';
+import Size from '../../geo/Size';
 
 const options = {
     'maxCacheSize': 1024
 };
+
+
+const DEFAULT_TILESIZE = new Size(256, 256);
 
 /**
  * @classdesc
@@ -88,12 +92,20 @@ class GroupTileLayer extends TileLayer {
         return profile;
     }
 
+    getTileSize(id) {
+        const layer = this.getLayer(id);
+        if (!layer) {
+            return DEFAULT_TILESIZE;
+        }
+        return layer.getTileSize();
+    }
+
     /**
      * Get tiles at zoom (or current zoom)
      * @param {Number} z
      * @returns {Object} tiles
      */
-    getTiles(z) {
+    getTiles(z, parentLayer) {
         const layers = this.layers;
         const tiles = [];
         let count = 0;
@@ -102,7 +114,7 @@ class GroupTileLayer extends TileLayer {
             if (!layer.options['visible']) {
                 continue;
             }
-            const childGrid = layer.getTiles(z, this);
+            const childGrid = layer.getTiles(z, parentLayer || this);
             if (!childGrid || childGrid.count === 0) {
                 continue;
             }
@@ -137,6 +149,10 @@ class GroupTileLayer extends TileLayer {
         this.layerMap = {};
         this._groupChildren = [];
         super.onRemove();
+    }
+
+    getLayer(id) {
+        return this.getChildLayer(id);
     }
 
     getChildLayer(id) {

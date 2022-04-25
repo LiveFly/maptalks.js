@@ -84,7 +84,7 @@ describe('Geometry.InfoWindow', function () {
         var w = marker.getInfoWindow();
         var position = w.getPosition();
         if (maptalks.Browser.ie) {
-            expect(position.round().toArray()).to.be.eql([433, -85]);
+            expect(position.round().toArray()).to.be.eql([433, -86]);
         } else {
             expect(position.round().toArray()).to.be.eql([433, -109]);
         }
@@ -248,7 +248,8 @@ describe('Geometry.InfoWindow', function () {
             var options = {
                 title: 'title',
                 content: 'content',
-                animation : null
+                animation : null,
+                roundPoint:true
             };
             var infoWindow = new maptalks.ui.InfoWindow(options);
             var geo = new maptalks.Marker(map.getCenter());
@@ -402,7 +403,8 @@ describe('Geometry.InfoWindow', function () {
                 animation : 'fade,scale',
                 animationOnHide : true,
                 animationDuration : 50,
-                autoPan : false
+                autoPan : false,
+                roundPoint:true
             };
             var infoWindow = new maptalks.ui.InfoWindow(options);
             var geo = new maptalks.Marker(map.getCenter());

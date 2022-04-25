@@ -76,11 +76,12 @@ class ImageLayer extends Layer {
             images = [images];
         }
         const map = this.getMap();
+        const glRes = map.getGLRes();
         this._imageData = images.map(img => {
             const extent = new Extent(img.extent);
             return extend({}, img, {
                 extent: extent,
-                extent2d: extent.convertTo(c => map.coordToPoint(c, map.getGLZoom()))
+                extent2d: extent.convertTo(c => map.coordToPointAtRes(c, glRes))
             });
         });
         this._images = images;
@@ -135,22 +136,16 @@ export class ImageLayerCanvasRenderer extends CanvasRenderer {
         return urls;
     }
 
-    retireImage(/* image */) {
+    retireImage(image) {
+        if (image.close) {
+            image.close();
+        }
 
     }
 
     refreshImages() {
         this._imageLoaded = false;
         this.setToRedraw();
-    }
-
-    needToRedraw() {
-        const map = this.getMap();
-        // don't redraw when map is zooming without pitch and layer doesn't have any point symbolizer.
-        if (map.isZooming() && !map.getPitch()) {
-            return false;
-        }
-        return super.needToRedraw();
     }
 
     draw() {
@@ -166,7 +161,7 @@ export class ImageLayerCanvasRenderer extends CanvasRenderer {
     _drawImages() {
         const imgData = this.layer._imageData;
         const map = this.getMap();
-        const mapExtent = map._get2DExtent(map.getGLZoom());
+        const mapExtent = map._get2DExtentAtRes(map.getGLRes());
         if (imgData && imgData.length) {
             for (let i = 0; i < imgData.length; i++) {
                 const extent = imgData[i].extent2d;
@@ -188,7 +183,7 @@ export class ImageLayerCanvasRenderer extends CanvasRenderer {
         }
         const map = this.getMap();
         const nw = TEMP_POINT.set(extent.xmin, extent.ymax);
-        const point = map._pointToContainerPoint(nw, map.getGLZoom());
+        const point = map._pointAtResToContainerPoint(nw, map.getGLRes());
         let x = point.x, y = point.y;
         const bearing = map.getBearing();
         if (bearing) {
@@ -246,6 +241,9 @@ export class ImageLayerGLRenderer extends ImageGLRenderable(ImageLayerCanvasRend
     }
 
     retireImage(image) {
+        if (image.close) {
+            image.close();
+        }
         this.disposeImage(image);
     }
 

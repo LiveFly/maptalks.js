@@ -6,6 +6,7 @@ import OverlayLayer from './OverlayLayer';
 import Painter from '../renderer/geometry/Painter';
 import CollectionPainter from '../renderer/geometry/CollectionPainter';
 import Coordinate from '../geo/Coordinate';
+import Point from '../geo/Point';
 import { LineString, Curve } from '../geometry';
 import PointExtent from '../geo/PointExtent';
 
@@ -39,9 +40,11 @@ const options = {
     'drawAltitude': false,
     'sortByDistanceToCamera': false,
     'roundPoint': false,
-    'altitude': 0
+    'altitude': 0,
+    'clipBBoxBufferSize': 3
 };
-
+// Polyline is for custom line geometry
+// const TYPES = ['LineString', 'Polyline', 'Polygon', 'MultiLineString', 'MultiPolygon'];
 /**
  * @classdesc
  * A layer for managing and rendering geometries.
@@ -81,23 +84,55 @@ class VectorLayer extends OverlayLayer {
      */
     identify(coordinate, options = {}) {
         const renderer = this.getRenderer();
-        // only iterate drawn geometries when onlyVisible is true.
-        if (options['onlyVisible'] && renderer && renderer.identify) {
-            return renderer.identify(coordinate, options);
-        }
         if (!(coordinate instanceof Coordinate)) {
             coordinate = new Coordinate(coordinate);
         }
-        return this._hitGeos(this._geoList, coordinate, options);
+        const cp = this.getMap().coordToContainerPoint(coordinate);
+        // only iterate drawn geometries when onlyVisible is true.
+        if (options['onlyVisible'] && renderer && renderer.identifyAtPoint) {
+            return renderer.identifyAtPoint(cp, options);
+        }
+        return this._hitGeos(this._geoList, cp, options);
     }
 
-    _hitGeos(geometries, coordinate, options = {}) {
+    /**
+     * Identify the geometries on the given container point
+     * @param  {maptalks.Point} point   - container point to identify
+     * @param  {Object} [options=null]  - options
+     * @param  {Object} [options.tolerance=0] - identify tolerance in pixel
+     * @param  {Object} [options.count=null]  - result count
+     * @return {Geometry[]} geometries identified
+     */
+    identifyAtPoint(point, options = {}) {
+        const renderer = this.getRenderer();
+        if (!(point instanceof Point)) {
+            point = new Point(point);
+        }
+        // only iterate drawn geometries when onlyVisible is true.
+        if (options['onlyVisible'] && renderer && renderer.identifyAtPoint) {
+            return renderer.identifyAtPoint(point, options);
+        }
+        return this._hitGeos(this._geoList, point, options);
+    }
+
+    _hitGeos(geometries, cp, options = {}) {
         const filter = options['filter'],
             tolerance = options['tolerance'],
             hits = [];
         const map = this.getMap();
-        const point = map.coordToPoint(coordinate);
-        const cp = map._pointToContainerPoint(point, undefined, 0, point);
+        const renderer = this.getRenderer();
+        const imageData = renderer && renderer.getImageData && renderer.getImageData();
+        if (imageData) {
+            const r = map.getDevicePixelRatio();
+            imageData.r = r;
+            const x = Math.round(cp.x * r),
+                y = Math.round(cp.y * r);
+            const idx = y * imageData.width * 4 + x * 4;
+            //空白的直接返回，避免下面的逻辑,假设有50%的概率不命中(要么命中,要么不命中)，可以节省大量的时间
+            if (imageData.data[idx + 3] === 0) {
+                return hits;
+            }
+        }
         for (let i = geometries.length - 1; i >= 0; i--) {
             const geo = geometries[i];
             if (!geo || !geo.isVisible() || !geo._getPainter() || !geo.options['interactive']) {

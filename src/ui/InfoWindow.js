@@ -1,20 +1,22 @@
-import { isString } from '../core/util';
+import { isFunction, isNumber, isObject, isString } from '../core/util';
 import { createEl, addDomEvent, removeDomEvent } from '../core/util/dom';
 import Point from '../geo/Point';
+import Size from '../geo/Size';
 import { Geometry, Marker, MultiPoint, LineString, MultiLineString } from '../geometry';
 import UIComponent from './UIComponent';
-
+const PROPERTY_PATTERN = /\{ *([\w_]+) *\}/g;
 
 /**
  * @property {Object} options
  * @property {Boolean} [options.autoPan=true]  - set it to false if you don't want the map to do panning animation to fit the opened window.
- * @property {Boolean} [options.autoCloseOn=null] - Auto close infowindow on map's events, e.g. "click contextmenu" will close infowindow with click or right click on map.
- * @property {Boolean} [options.autoOpenOn=null]  - Auto open infowindow on owner's events, e.g. "click" will open infowindow with click or right click on window's owner.
- * @property {Number}  [options.width=300]     - default width
+ * @property {String} [options.autoCloseOn=null] - Auto close infowindow on map's events, e.g. "click contextmenu" will close infowindow with click or right click on map.
+ * @property {String} [options.autoOpenOn='click']  - Auto open infowindow on owner's events, e.g. "click" will open infowindow with click or right click on window's owner.
+ * @property {Number}  [options.width=auto]     - default width
  * @property {Number}  [options.minHeight=120] - minimun height
  * @property {Boolean} [options.custom=false]  - set it to true if you want a customized infowindow, customized html codes or a HTMLElement is set to content.
  * @property {String}  [options.title=null]    - title of the infowindow.
  * @property {String|HTMLElement}  options.content - content of the infowindow.
+ * @property {Boolean}  [options.enableTemplate=false]  - whether open template . such as content:`homepage:{url},company name:{name}`.
  * @memberOf ui.InfoWindow
  * @instance
  */
@@ -23,12 +25,15 @@ const options = {
     'autoPan': true,
     'autoCloseOn': null,
     'autoOpenOn': 'click',
-    'width': 300,
+    'width': 'auto',
     'minHeight': 120,
     'custom': false,
     'title': null,
-    'content': null
+    'content': null,
+    'enableTemplate': false
 };
+
+const EMPTY_SIZE = new Size(0, 0);
 
 /**
  * @classdesc
@@ -136,12 +141,21 @@ class InfoWindow extends UIComponent {
     }
 
     buildOn() {
+        const isFunc = isFunction(this.options['content']);
+        const isStr = isString(this.options['content']);
         if (this.options['custom']) {
-            if (isString(this.options['content'])) {
+            if (isStr || isFunc) {
                 const dom = createEl('div');
-                dom.innerHTML = this.options['content'];
+                if (isStr) {
+                    dom.innerHTML = this.options['content'];
+                    this._replaceTemplate(dom);
+                } else {
+                    //dymatic render dom content
+                    this.options['content'].bind(this)(dom);
+                }
                 return dom;
             } else {
+                this._replaceTemplate(this.options['content']);
                 return this.options['content'];
             }
         }
@@ -149,7 +163,8 @@ class InfoWindow extends UIComponent {
         if (this.options['containerClass']) {
             dom.className = this.options['containerClass'];
         }
-        dom.style.width = this._getWindowWidth() + 'px';
+        const width = this._getWindowWidth();
+        dom.style.width = isNumber(width) ? width + 'px' : 'auto';
         dom.style.bottom = '0px'; // fix #657
         let content = '<em class="maptalks-ico"></em>';
         if (this.options['title']) {
@@ -157,17 +172,40 @@ class InfoWindow extends UIComponent {
         }
         content += '<a href="javascript:void(0);" class="maptalks-close"></a><div class="maptalks-msgContent"></div>';
         dom.innerHTML = content;
+        //reslove title
+        this._replaceTemplate(dom);
         const msgContent = dom.querySelector('.maptalks-msgContent');
-        if (isString(this.options['content'])) {
-            msgContent.innerHTML = this.options['content'];
+        if (isStr || isFunc) {
+            if (isStr) {
+                msgContent.innerHTML = this.options['content'];
+            } else {
+                //dymatic render dom content
+                this.options['content'].bind(this)(msgContent);
+            }
         } else {
             msgContent.appendChild(this.options['content']);
         }
         this._onCloseBtnClick = this.hide.bind(this);
         const closeBtn = dom.querySelector('.maptalks-close');
         addDomEvent(closeBtn, 'click touchend', this._onCloseBtnClick);
-
+        //reslove content
+        if (!isFunc) {
+            this._replaceTemplate(msgContent);
+        }
         return dom;
+    }
+
+    _replaceTemplate(dom) {
+        if (this.options['enableTemplate'] && this._owner && this._owner.getProperties && dom && dom.innerHTML) {
+            const properties = this._owner.getProperties() || {};
+            if (isObject(properties)) {
+                const html = dom.innerHTML;
+                dom.innerHTML = html.replace(PROPERTY_PATTERN, function (str, key) {
+                    return properties[key];
+                });
+            }
+        }
+        return this;
     }
 
     /**
@@ -201,6 +239,9 @@ class InfoWindow extends UIComponent {
                 }
                 painter = children[0]._getPainter();
                 markerSize = children[0].getSize();
+            }
+            if (!markerSize) {
+                markerSize = EMPTY_SIZE;
             }
             if (painter) {
                 const fixExtent = painter.getFixedExtent();
@@ -349,7 +390,7 @@ class InfoWindow extends UIComponent {
     }
 
     _getWindowWidth() {
-        const defaultWidth = 300;
+        const defaultWidth = options.width;
         let width = this.options['width'];
         if (!width) {
             width = defaultWidth;
