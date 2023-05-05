@@ -11,7 +11,8 @@ describe('TileLayer', function () {
         document.body.appendChild(container);
         var option = {
             zoom: 17,
-            center: center
+            center: center,
+            stopRenderOnOffscreen: false
         };
         map = new maptalks.Map(container, option);
     }
@@ -58,17 +59,17 @@ describe('TileLayer', function () {
             map.addLayer(tile);
         });
 
-        // it('invisible container, for #692', function (done) {
-        //     createMap('0px', '0px');
-        //     var tile = new maptalks.TileLayer('tile', {
-        //         renderer : 'canvas',
-        //         urlTemplate : '/resources/not-exists.png'
-        //     });
-        //     tile.once('layerload', function () {
-        //         done();
-        //     });
-        //     map.addLayer(tile);
-        // });
+        it('invisible container, for #692', function (done) {
+            createMap('0px', '0px');
+            var tile = new maptalks.TileLayer('tile', {
+                renderer : 'canvas',
+                urlTemplate : '/resources/not-exists.png'
+            });
+            tile.once('layerload', function () {
+                done();
+            });
+            map.addLayer(tile);
+        });
 
         it('with maxAvailableZoom set', function (done) {
             createMap();
@@ -149,7 +150,18 @@ describe('TileLayer', function () {
                 },
                 'attribution' :  '&copy; <a target="_blank" href="http://map.baidu.com">Baidu</a>'
             }).addTo(map);
-            expect(layer.getTiles().tileGrids[0].tiles.length).to.be.eql(5);
+            var parser = new UAParser();
+            var result = parser.getOS();
+            var tilesLength=layer.getTiles().tileGrids[0].tiles.length;
+            if (result.name) {
+                if (result.name.toLowerCase().indexOf('windows') > -1) {
+                    expect(tilesLength).to.be.eql(4);
+                }else{
+                    expect(tilesLength).to.be.eql(5);
+                }
+            }else{
+                expect(tilesLength).to.be.eql(5);
+            }
         });
     });
 

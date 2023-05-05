@@ -9,6 +9,7 @@ import {
     isString,
     extend
 } from '../../core/util';
+import LRUCache from '../../core/util/LRUCache';
 import Browser from '../../core/Browser';
 import Size from '../../geo/Size';
 import Point from '../../geo/Point';
@@ -19,8 +20,6 @@ import Layer from '../Layer';
 import SpatialReference from '../../map/spatial-reference/SpatialReference';
 import { intersectsBox } from 'frustum-intersects';
 import * as vec3 from '../../core/util/vec3';
-import { registerWorkerAdapter } from '../../core/worker/Worker';
-import { imageFetchWorkerKey } from '../../core/worker/CoreWorkers';
 
 const DEFAULT_MAXERROR = 1;
 const TEMP_POINT = new Point(0, 0);
@@ -70,11 +69,11 @@ class TileHashset {
  * @property {Number}              [options.maxAvailableZoom=null] - Maximum zoom level for which tiles are available. Data from tiles at the maxAvailableZoom are used when displaying the map at higher zoom levels.
  * @property {Boolean}             [options.repeatWorld=true]  - tiles will be loaded repeatedly outside the world.
  * @property {Boolean}             [options.background=true]   - whether to draw a background during or after interacting, true by default
- * @property {Number}              [options.backgroundZoomDiff=6] - the zoom diff to find parent tile as background
  * @property {Boolean|Function}    [options.placeholder=false]    - a placeholder image to replace loading tile, can be a function with a parameter of the tile canvas
  * @property {String}              [options.fragmentShader=null]  - custom fragment shader, replace <a href="https://github.com/maptalks/maptalks.js/blob/master/src/renderer/layer/tilelayer/TileLayerGLRenderer.js#L8">the default fragment shader</a>
  * @property {String}              [options.crossOrigin=null]    - tile image's corssOrigin
  * @property {Boolean}             [options.fadeAnimation=true]  - fade animation when loading tiles
+ * @property {Number}              [options.fadeDuration=167]    - fading animation duration in ms, default is 167 (10 frames)
  * @property {Boolean}             [options.debug=false]         - if set to true, tiles will have borders and a title of its coordinates.
  * @property {String}              [options.renderer=gl]         - TileLayer's renderer, canvas or gl. gl tiles requires image CORS that canvas doesn't. canvas tiles can't pitch.
  * @property {Number}              [options.maxCacheSize=256]    - maximum number of tiles to cache
@@ -86,6 +85,7 @@ class TileHashset {
  * @property {Boolean}             [options.decodeImageInWorker=false]  - decode image in worker, for better performance if the server support
  * @property {String}              [options.token=null]       - token to replace {token} in template http://foo/bar/{z}/{x}/{y}?token={token}
  * @property {Object}              [options.fetchOptions=object]       - fetch params,such as fetchOptions: { 'headers': { 'accept': '' } }, about accept value more info https://developer.mozilla.org/en-US/docs/Web/HTTP/Content_negotiation/List_of_default_Accept_values
+ * @property {Boolean}             [options.awareOfTerrain=true]       - if the tile layer is aware of terrain.
  * @memberOf TileLayer
  * @instance
  */
@@ -99,7 +99,6 @@ const options = {
     'repeatWorld': true,
 
     'background': true,
-    'backgroundZoomDiff': 6,
 
     'loadingLimitOnInteracting': 3,
 
@@ -116,6 +115,8 @@ const options = {
     'tileSystem': null,
 
     'fadeAnimation': !IS_NODE,
+
+    'fadeDuration': (1000 / 60 * 10),
 
     'debug': false,
 
@@ -137,7 +138,14 @@ const options = {
 
     'pyramidMode': 1,
 
-    'decodeImageInWorker': false
+    'decodeImageInWorker': false,
+
+    'tileLimitPerFrame': 0,
+
+    'tileStackStartDepth': 7,
+    'tileStackDepth': 3,
+
+    'awareOfTerrain': true
 };
 
 const URL_PATTERN = /\{ *([\w_]+) *\}/g;
@@ -184,6 +192,18 @@ class TileLayer extends Layer {
             return null;
         }
         return new TileLayer(layerJSON['id'], layerJSON['options']);
+    }
+
+    /**
+     * force Reload tilelayer.
+     * Note that this method will clear all cached tiles and reload them. It shouldn't be called frequently for performance reason.
+
+     * @return {TileLayer} this
+     */
+    forceReload() {
+        this.clear();
+        this.load();
+        return this;
     }
 
 
@@ -284,11 +304,13 @@ class TileLayer extends Layer {
                     z,
                     idx: i,
                     idy: y,
+                    res,
                     extent2d: tileConfig.getTilePrjExtent(i, y, res).convertTo(c => map._prjToPointAtRes(c, res, TEMP_POINT)),
                     id: this._getTileId(i, y, z),
                     url: this.getTileUrl(i, y, z + this.options['zoomOffset']),
                     offset: [0, 0],
-                    error: error
+                    error: error,
+                    children: []
                 });
             }
         }
@@ -327,7 +349,7 @@ class TileLayer extends Layer {
             z = this._getTileZoom(map.getZoom());
         }
         const sr = this.getSpatialReference();
-        const maxZoom = Math.min(z, this.getMaxZoom());
+        const maxZoom = Math.min(z, this.getMaxZoom(), this.options['maxAvailableZoom'] || Infinity);
         const projectionView = map.projViewMatrix;
         const fullExtent = this._getTileFullExtent();
 
@@ -373,8 +395,10 @@ class TileLayer extends Layer {
         const offsets = {
             0: offset0
         };
+
         const extent = new PointExtent();
         const tiles = [];
+        const parents = [];
         while (queue.length > 0) {
             const node = queue.pop();
             if (node.z === maxZoom) {
@@ -386,19 +410,31 @@ class TileLayer extends Layer {
                 offsets[node.z + 1] = this._getTileOffset(node.z + 1);
             }
             this._splitNode(node, projectionView, queue, tiles, extent, maxZoom, offsets[node.z + 1], layer && layer.getRenderer(), glRes);
+            if (this.isParentTile(z, maxZoom, node)) {
+                parents.push(node);
+            }
         }
+        parents.sort(sortingTiles);
         return {
             tileGrids: [
                 {
                     extent,
                     count: tiles.length,
                     tiles,
+                    parents,
                     offset: [0, 0],
                     zoom: z
                 }
             ],
             count: tiles.length
         };
+    }
+
+    isParentTile(z, maxZoom, tile) {
+        const stackMinZoom = Math.max(this.getMinZoom(), z - this.options['tileStackStartDepth']);
+        const stackMaxZoom = Math.min(maxZoom, stackMinZoom + this.options['tileStackDepth']);
+        return tile.z >= stackMinZoom && tile.z < stackMaxZoom;
+
     }
 
     _splitNode(node, projectionView, queue, tiles, gridExtent, maxZoom, offset, parentRenderer, glRes) {
@@ -418,7 +454,8 @@ class TileLayer extends Layer {
 
         let hasCurrentIn = false;
         const children = [];
-        const glScale = sr.getResolution(z) / glRes;
+        const res = sr.getResolution(z);
+        const glScale = res / glRes;
         for (let i = 0; i < 4; i++) {
             const dx = (i % 2);
             const dy = (i >> 1);
@@ -427,36 +464,51 @@ class TileLayer extends Layer {
             const childIdx = (idx << 1) + dx;
             const childIdy = (idy << 1) + dy;
 
-            const tileId = this._getTileId(childIdx, childIdy, z);
+            // const tileId = this._getTileId(childIdx, childIdy, z);
+            if (!node.children) {
+                node.children = [];
+            }
+            let tileId = node.children[i];
+            if (!tileId) {
+                tileId = this._getTileId(childIdx, childIdy, z);
+                node.children[i] = tileId;
+            }
             const cached = renderer.isTileCachedOrLoading(tileId);
             let extent;
-            if (!cached) {
-                if (scaleY < 0) {
-                    const nwx = minx + dx * width;
-                    const nwy = maxy - dy * height;
-                    // extent2d 是 node.z 级别上的 extent
-                    extent = new PointExtent(nwx, nwy - height, nwx + width, nwy);
-
-                } else {
-                    const swx = minx + dx * width;
-                    const swy = miny + dy * height;
-                    extent = new PointExtent(swx, swy, swx + width, swy + height);
-                }
-            }
             let childNode = cached && cached.info;
             if (!childNode) {
-                childNode = {
-                    x: childX,
-                    y: childY,
-                    idx: childIdx,
-                    idy: childIdy,
-                    z,
-                    extent2d: extent,
-                    error: node.error / 2,
-                    id: tileId,
-                    url: this.getTileUrl(childX, childY, z + this.options['zoomOffset']),
-                    offset
-                };
+                if (!this.tileInfoCache) {
+                    this.tileInfoCache = new LRUCache(this.options['maxCacheSize'] * 4);
+                }
+                childNode = this.tileInfoCache.get(tileId);
+                if (!childNode) {
+                    if (scaleY < 0) {
+                        const nwx = minx + dx * width;
+                        const nwy = maxy - dy * height;
+                        // extent2d 是 node.z 级别上的 extent
+                        extent = new PointExtent(nwx, nwy - height, nwx + width, nwy);
+
+                    } else {
+                        const swx = minx + dx * width;
+                        const swy = miny + dy * height;
+                        extent = new PointExtent(swx, swy, swx + width, swy + height);
+                    }
+                    childNode = {
+                        x: childX,
+                        y: childY,
+                        idx: childIdx,
+                        idy: childIdy,
+                        z,
+                        extent2d: extent,
+                        error: node.error / 2,
+                        res,
+                        id: tileId,
+                        children: [],
+                        url: this.getTileUrl(childX, childY, z + this.options['zoomOffset']),
+                        offset
+                    };
+                    this.tileInfoCache.add(tileId, childNode);
+                }
                 if (parentRenderer) {
                     childNode['layer'] = this.getId();
                 }
@@ -470,6 +522,7 @@ class TileLayer extends Layer {
             } else if (visible === -1) {
                 continue;
             } else if (visible === 0 && z !== maxZoom) {
+                // 任意子瓦片的error低于maxError，则添加父级瓦片，不再遍历子瓦片
                 tiles.push(node);
                 gridExtent._combine(node.extent2d);
                 return;
@@ -544,11 +597,21 @@ class TileLayer extends Layer {
     // }
 
     _isTileInFrustum(node, projectionView, glScale, offset) {
+        if (!this._zScale) {
+            const map = this.getMap();
+            const glRes = map.getGLRes();
+            this._zScale = map.altitudeToPoint(100, glRes) / 100;
+        }
+        const renderer = this.getRenderer();
         const { xmin, ymin, xmax, ymax } = node.extent2d;
         TILE_BOX[0][0] = (xmin - offset[0]) * glScale;
         TILE_BOX[0][1] = (ymin - offset[1]) * glScale;
+        const minAltitude = node.minAltitude || renderer && renderer.avgMinAltitude || 0;
+        TILE_BOX[0][2] = minAltitude * this._zScale;
         TILE_BOX[1][0] = (xmax - offset[0]) * glScale;
         TILE_BOX[1][1] = (ymax - offset[1]) * glScale;
+        const maxAltitude = node.maxAltitude || renderer && renderer.avgMaxAltitude || 0;
+        TILE_BOX[1][2] = maxAltitude * this._zScale;
         return intersectsBox(projectionView, TILE_BOX);
     }
 
@@ -715,6 +778,9 @@ class TileLayer extends Layer {
     clear() {
         if (this._renderer) {
             this._renderer.clear();
+        }
+        if (this.tileInfoCache) {
+            this.tileInfoCache.reset();
         }
         /**
          * clear event, fired when tile layer is cleared.
@@ -969,11 +1035,12 @@ class TileLayer extends Layer {
                 //     tileExtent.set(p.x, p.y - height, p.x + width, p.y);
                 // }
                 if (allCount <= 4 || rightVisitEnd || this._isTileInExtent(frustumMatrix, tileExtent, offset, glScale)) {
+                    const tileRes = this._hasOwnSR ? map._getResolution(z) : res;
                     if (this._visitedTiles && cascadeLevel === 0) {
                         this._visitedTiles.add(tileId);
                     }
                     if (canSplitTile && cascadeLevel === 0) {
-                        this._splitTiles(frustumMatrix, tiles, renderer, idx, z + 1, tileExtent, dx, dy, tileOffsets, parentRenderer);
+                        this._splitTiles(frustumMatrix, tiles, renderer, idx, z + 1, tileRes, tileExtent, dx, dy, tileOffsets, parentRenderer);
                         extent._combine(tileExtent);
                     } else {
                         if (!tileInfo) {
@@ -988,6 +1055,7 @@ class TileLayer extends Layer {
                                 'extent2d': tileExtent,
                                 'offset': offset,
                                 'id': tileId,
+                                'res': tileRes,
                                 'url': this.getTileUrl(idx.x, idx.y, z)
                             };
                             if (parentRenderer) {
@@ -1049,7 +1117,7 @@ class TileLayer extends Layer {
         });
     }
 
-    _splitTiles(frustumMatrix, tiles, renderer, tileIdx, z, tileExtent, dx, dy, tileOffsets, parentRenderer) {
+    _splitTiles(frustumMatrix, tiles, renderer, tileIdx, z, res, tileExtent, dx, dy, tileOffsets, parentRenderer) {
         // const hasOffset = offset[0] || offset[1];
         const yOrder = this._getTileConfig().tileSystem.scale.y;
         const glScale = this.getMap().getGLScale(z);
@@ -1062,17 +1130,17 @@ class TileLayer extends Layer {
         const x = tileIdx.x * 2;
         const y = tileIdx.y * 2;
 
-        let tile = this._checkAndAddTile(frustumMatrix, renderer, idx, idy, x, y, z, 0, 0, w, h, corner, glScale, tileOffsets, parentRenderer);
+        let tile = this._checkAndAddTile(frustumMatrix, renderer, idx, idy, x, y, z, res, 0, 0, w, h, corner, glScale, tileOffsets, parentRenderer);
         if (tile) tiles.push(tile);
-        tile = this._checkAndAddTile(frustumMatrix, renderer, idx, idy, x, y, z, 0, 1, w, h, corner, glScale, tileOffsets, parentRenderer);
+        tile = this._checkAndAddTile(frustumMatrix, renderer, idx, idy, x, y, z, res, 0, 1, w, h, corner, glScale, tileOffsets, parentRenderer);
         if (tile) tiles.push(tile);
-        tile = this._checkAndAddTile(frustumMatrix, renderer, idx, idy, x, y, z, 1, 0, w, h, corner, glScale, tileOffsets, parentRenderer);
+        tile = this._checkAndAddTile(frustumMatrix, renderer, idx, idy, x, y, z, res, 1, 0, w, h, corner, glScale, tileOffsets, parentRenderer);
         if (tile) tiles.push(tile);
-        tile = this._checkAndAddTile(frustumMatrix, renderer, idx, idy, x, y, z, 1, 1, w, h, corner, glScale, tileOffsets, parentRenderer);
+        tile = this._checkAndAddTile(frustumMatrix, renderer, idx, idy, x, y, z, res, 1, 1, w, h, corner, glScale, tileOffsets, parentRenderer);
         if (tile) tiles.push(tile);
     }
 
-    _checkAndAddTile(frustumMatrix, renderer, idx, idy, x, y, z, i, j, w, h, corner, glScale, tileOffsets, parentRenderer) {
+    _checkAndAddTile(frustumMatrix, renderer, idx, idy, x, y, z, res, i, j, w, h, corner, glScale, tileOffsets, parentRenderer) {
         const tileId = this._getTileId(idx + i, idy + j, z);
         if (this._visitedTiles && this._visitedTiles.has(tileId)) {
             return null;
@@ -1087,6 +1155,7 @@ class TileLayer extends Layer {
             !this._isSplittedTileInExtent(frustumMatrix, childExtent, offset, glScale)) {
             return null;
         }
+        const childRes = res / 2;
         let tileInfo = renderer && renderer.isTileCachedOrLoading(tileId);
         if (!tileInfo) {
             //reserve point caculated by tileConfig
@@ -1098,6 +1167,7 @@ class TileLayer extends Layer {
                 'extent2d': childExtent,
                 'id': tileId,
                 'offset': offset,
+                'res': childRes,
                 'url': this.getTileUrl(x + i, y + j, z + this.options['zoomOffset'])
             };
             if (parentRenderer) {
@@ -1110,16 +1180,26 @@ class TileLayer extends Layer {
     }
 
     _getTileOffset(z) {
+        if (!this._tileOffsets) {
+            this._tileOffsets = {};
+        }
+        if (this._tileOffsets[z]) {
+            return this._tileOffsets[z];
+        }
         let offset = this.options['offset'];
         if (isFunction(offset)) {
-            offset = offset(z);
+            offset = offset.call(this, z);
         }
-        return offset;
+        if (isNumber(offset)) {
+            offset = [offset, offset];
+        }
+        this._tileOffsets[z] = offset || [0, 0];
+        return this._tileOffsets[z];
     }
 
     _getTileId(x, y, zoom, id) {
         //id is to mark GroupTileLayer's child layers
-        return `${id || this.getId()}_${y}_${x}_${zoom}`;
+        return `${id || this.getId()}_${x}_${y}_${zoom}`;
     }
 
 
@@ -1238,10 +1318,40 @@ class TileLayer extends Layer {
         delete this._sr;
         delete this._srMinZoom;
         delete this._hasOwnSR;
+        delete this._rootNodes;
+        if (this.tileInfoCache) {
+            this.tileInfoCache.reset();
+        }
         const renderer = this.getRenderer();
         if (renderer) {
             renderer.clear();
         }
+    }
+
+    /**
+     * Get layer's polygonOffset count
+     * @return {Number}
+     */
+    getPolygonOffsetCount() {
+        return 2;
+    }
+
+    /**
+     * Get layer's base polygon offset
+     * @return {Number}
+     */
+    getPolygonOffset() {
+        return this._polygonOffset || 0;
+    }
+
+    /**
+     * Set layer's base polygon offset, called by GroupGLLayer
+     * @param {Number} offset polygon offset
+     * @return {TileLayer}
+     */
+    setPolygonOffset(offset) {
+        this._polygonOffset = offset;
+        return this;
     }
 }
 
@@ -1270,50 +1380,7 @@ function distanceToRect(min, max, xyz) {
     return Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-const workerSource = `
-function (exports) {
-    exports.onmessage = function (msg, postResponse) {
-        var url = msg.data.url;
-        var fetchOptions = msg.data.fetchOptions;
-        requestImageOffscreen(url, function (err, data) {
-            var buffers = [];
-            if (data && data.data && data.data.buffer) {
-                buffers.push(data.data.buffer);
-            }
-            postResponse(err, data, buffers);
-        }, fetchOptions);
-    };
 
-    var offCanvas, offCtx;
-    function requestImageOffscreen(url, cb, fetchOptions) {
-        if (!offCanvas) {
-            offCanvas = new OffscreenCanvas(2, 2);
-            offCtx = offCanvas.getContext('2d');
-        }
-        fetch(url, fetchOptions ? fetchOptions : {})
-            .then(response => response.blob())
-            .then(blob => createImageBitmap(blob))
-            .then(bitmap => {
-                var { width, height } = bitmap;
-                offCanvas.width = width;
-                offCanvas.height = height;
-                offCtx.drawImage(bitmap, 0, 0);
-                bitmap.close();
-                var imgData = offCtx.getImageData(0, 0, width, height);
-                // debugger
-                cb(null, { width, height, data: new Uint8Array(imgData.data) });
-            }).catch(err => {
-                console.warn('error when loading tile:', url);
-                console.warn(err);
-                cb(err);
-            });
-    }
-}`;
-
-function registerWorkerSource() {
-    if (!Browser.decodeImageInWorker) {
-        return;
-    }
-    registerWorkerAdapter(imageFetchWorkerKey, function () { return workerSource; });
+function sortingTiles(t0, t1) {
+    return t0.z - t1.z;
 }
-registerWorkerSource();

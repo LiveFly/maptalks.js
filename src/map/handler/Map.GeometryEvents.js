@@ -147,6 +147,11 @@ const EVENTS =
  * @property {Event} domEvent                 - dom event
  */
 
+const MOUSEEVENT_ASSOCIATION_TABLE = {
+    'mousemove': ['mousemove', 'mouseover', 'mouseout', 'mouseenter'],
+    'touchend': ['touchend', 'click']
+};
+
 class MapGeometryEventsHandler extends Handler {
 
     addHooks() {
@@ -194,7 +199,9 @@ class MapGeometryEventsHandler extends Handler {
         }
         const containerPoint = getEventContainerPoint(actual, map._containerDOM);
         if (eventType === 'touchstart') {
-            preventDefault(domEvent);
+            if (map.options['preventTouch']) {
+                preventDefault(domEvent);
+            }
         }
 
         let geometryCursorStyle = null;
@@ -230,7 +237,7 @@ class MapGeometryEventsHandler extends Handler {
             return;
         }
 
-
+        const eventTypes = MOUSEEVENT_ASSOCIATION_TABLE[eventType] || [eventType];
         const identifyOptions = {
             'includeInternals': true,
             //return only one geometry on top,
@@ -253,9 +260,10 @@ class MapGeometryEventsHandler extends Handler {
                 return true;
             },
             'count': 1,
-            'containerPoint': containerPoint,
             'onlyVisible': map.options['onlyVisibleGeometryEvents'],
-            'layers': layers
+            containerPoint,
+            layers,
+            eventTypes
         };
         const callback = fireGeometryEvent.bind(this);
 

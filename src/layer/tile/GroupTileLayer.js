@@ -9,7 +9,7 @@ const options = {
 
 
 const DEFAULT_TILESIZE = new Size(256, 256);
-const EVENTS = 'show hide remove';
+const EVENTS = 'show hide remove setzindex';
 
 function checkLayers(tileLayers) {
     if (!Array.isArray(tileLayers)) {
@@ -187,7 +187,7 @@ class GroupTileLayer extends TileLayer {
         let count = 0;
         for (let i = 0, l = layers.length; i < l; i++) {
             const layer = layers[i];
-            if (!layer.options['visible'] || !layer.getMap()) {
+            if (!layer || !layer.options['visible'] || !layer.isVisible() || !layer.getMap()) {
                 continue;
             }
             const childGrid = layer.getTiles(z, parentLayer || this);
@@ -246,6 +246,8 @@ class GroupTileLayer extends TileLayer {
             target._doRemove();
             target.off(EVENTS, this._onLayerShowHide, this);
             this._refresh();
+        } else if (type === 'setzindex') {
+            this._sortLayers();
         }
         this._renderLayers();
         return this;

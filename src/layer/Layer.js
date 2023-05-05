@@ -1,5 +1,5 @@
 import Class from '../core/Class';
-import { isNil, isNumber } from '../core/util';
+import { isFunction, isNil, isNumber } from '../core/util';
 import Eventable from '../core/Eventable';
 import JSONAble from '../core/JSONAble';
 import Renderable from '../renderer/Renderable';
@@ -79,6 +79,7 @@ class Layer extends JSONAble(Eventable(Renderable(Class))) {
                 this.setMask(Geometry.fromJSON(options.mask));
             }
         }
+        this.proxyOptions();
     }
 
     /**
@@ -167,6 +168,7 @@ class Layer extends JSONAble(Eventable(Renderable(Class))) {
         if (this._renderer) {
             this._renderer.setZIndex(zIndex);
         }
+        this.fire('setzindex', { zIndex });
         return this;
     }
 
@@ -480,9 +482,17 @@ class Layer extends JSONAble(Eventable(Renderable(Class))) {
     }
 
     onConfig(conf) {
-        if (isNumber(conf['opacity']) || conf['cssFilter']) {
+        const needUpdate = conf && Object.keys && Object.keys(conf).length > 0;
+        if (needUpdate && isNil(conf['animation'])) {
+            // options change Hook,subLayers Can realize its own logic,such as tileSize/tileSystem etc change
+            if (this._optionsHook && isFunction(this._optionsHook)) {
+                this._optionsHook(conf);
+            }
+            if (this._silentConfig) {
+                return;
+            }
             const renderer = this.getRenderer();
-            if (renderer) {
+            if (renderer && renderer.setToRedraw) {
                 renderer.setToRedraw();
             }
         }

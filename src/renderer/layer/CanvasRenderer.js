@@ -6,6 +6,7 @@ import Canvas2D from '../../core/Canvas';
 import Actor from '../../core/worker/Actor';
 import Point from '../../geo/Point';
 import { imageFetchWorkerKey } from '../../core/worker/CoreWorkers';
+import { registerWorkerAdapter } from '../../core/worker/Worker';
 
 const EMPTY_ARRAY = [];
 class ResourceWorkerConnection extends Actor {
@@ -39,7 +40,7 @@ class CanvasRenderer extends Class {
         this.layer = layer;
         this._painted = false;
         this._drawTime = 0;
-        if (Browser.decodeImageInWorker) {
+        if (Browser.decodeImageInWorker && (layer.options['renderer'] === 'gl' || !Browser.safari && !Browser.iosWeixin)) {
             this._resWorkerConn = new ResourceWorkerConnection();
         }
         this.setToRedraw();
@@ -318,7 +319,7 @@ class CanvasRenderer extends Class {
         }
         const imageData = this.getImageData && this.getImageData();
         if (imageData) {
-            const x = r * point.x, y = r * point.y;
+            const x = Math.round(r * point.x), y = Math.round(r * point.y);
             const idx = y * imageData.width * 4 + x * 4;
             //索引下标从0开始需要-1
             return imageData.data[idx + 3] > 0;
@@ -427,7 +428,7 @@ class CanvasRenderer extends Class {
         if (this.gl && this.gl.canvas === this.canvas || this.context) {
             return;
         }
-        this.context = this.canvas.getContext('2d');
+        this.context = Canvas2D.getCanvas2DContext(this.canvas);
         if (!this.context) {
             return;
         }
@@ -580,10 +581,13 @@ class CanvasRenderer extends Class {
                 painter.paint(null, context);
             });
             context.stroke();
-            delete context.isMultiClip;
+            context.isMultiClip = false;
         } else {
+            context.isClip = true;
+            context.beginPath();
             const painter = mask._getMaskPainter();
             painter.paint(null, context);
+            context.isClip = false;
         }
         if (dpr !== 1) {
             context.restore();
@@ -771,7 +775,7 @@ class CanvasRenderer extends Class {
                 resolve(url);
                 return;
             }
-            if (!isSVG(url[0]) && Browser.decodeImageInWorker) {
+            if (!isSVG(url[0]) && me._resWorkerConn) {
                 const uri = getAbsoluteURL(url[0]);
                 me._resWorkerConn.fetchImage(uri, (err, data) => {
                     if (err) {
@@ -860,7 +864,7 @@ export class ResourceCache {
             height: +url[2],
             refCnt: 0
         };
-        if (img && !img.close && Browser.imageBitMap) {
+        if (img && !img.close && Browser.imageBitMap && !Browser.safari && !Browser.iosWeixin) {
             if (img.src && isSVG(img.src)) {
                 return;
             }
@@ -959,3 +963,39 @@ export class ResourceCache {
         this.resources = {};
     }
 }
+
+const workerSource = `
+function (exports) {
+    exports.onmessage = function (msg, postResponse) {
+        var url = msg.data.url;
+        var fetchOptions = msg.data.fetchOptions;
+        requestImageOffscreen(url, function (err, data) {
+            var buffers = [];
+            if (data && data.data) {
+                buffers.push(data.data);
+            }
+            postResponse(err, data, buffers);
+        }, fetchOptions);
+    };
+
+    function requestImageOffscreen(url, cb, fetchOptions) {
+        fetch(url, fetchOptions ? fetchOptions : {})
+            .then(response => response.blob())
+            .then(blob => createImageBitmap(blob))
+            .then(bitmap => {
+                cb(null, {data:bitmap});
+            }).catch(err => {
+                console.warn('error when loading tile:', url);
+                console.warn(err);
+                cb(err);
+            });
+    }
+}`;
+
+function registerWorkerSource() {
+    if (!Browser.decodeImageInWorker) {
+        return;
+    }
+    registerWorkerAdapter(imageFetchWorkerKey, function () { return workerSource; });
+}
+registerWorkerSource();

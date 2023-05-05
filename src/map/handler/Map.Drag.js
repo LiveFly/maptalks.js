@@ -13,7 +13,7 @@ class MapDragHandler extends Handler {
         const dom = map._panels.mapWrapper || map._containerDOM;
         this._dragHandler = new DragHandler(dom, {
             'cancelOn': this._cancelOn.bind(this),
-            'rightclick' : true
+            'rightclick': true
         });
         this._dragHandler.on('mousedown', this._onMouseDown, this)
             .on('dragstart', this._onDragStart, this)
@@ -139,8 +139,8 @@ class MapDragHandler extends Handler {
             t = 5 * t;
             const dscale = isTouch ? 5 : 2.8;
             const targetPrjCoord = currentCenter.add(dxy._multi(dscale));
-            const targetCoord = map.getProjection().unproject(targetPrjCoord);
-            map.panTo(targetCoord, { 'duration': isTouch ? t * 3 : t * 2, 'easing': 'outExpo' });
+            // map._fixPrjOnWorldWide(targetPrjCoord);
+            map._panTo(targetPrjCoord, { 'duration': isTouch ? t * 3 : t * 2, 'easing': 'outExpo' });
         } else {
             map.onMoveEnd(param);
         }
@@ -180,14 +180,14 @@ class MapDragHandler extends Handler {
         }
 
         if (this._rotateMode.indexOf('rotate') >= 0 && map.options['dragRotate']) {
-
+            const factor = 0.15;
             let db = 0;
             if (map.options['dragPitch'] || dx > dy) {
-                db = -0.6 * (this.preX - mx);
+                db = -factor * (this.preX - mx);
             } else if (mx > map.width / 2) {
-                db = 0.6 * (this.preY - my);
+                db = factor * (this.preY - my);
             } else {
-                db = -0.6 * (this.preY - my);
+                db = -factor * (this.preY - my);
             }
             const bearing = map.getBearing() + db;
             this._db = this._db || 0;
@@ -196,7 +196,7 @@ class MapDragHandler extends Handler {
             map._setBearing(bearing);
         }
         if (this._rotateMode.indexOf('pitch') >= 0 && map.options['dragPitch']) {
-            map._setPitch(map.getPitch() + (this.preY - my) * 0.4);
+            map._setPitch(map.getPitch() + (this.preY - my) * 0.15);
         }
         this.preX = mx;
         this.preY = my;
@@ -233,10 +233,10 @@ class MapDragHandler extends Handler {
 
 Map.mergeOptions({
     'draggable': true,
-    'dragPan' : true,
-    'dragRotatePitch' : true,
-    'dragRotate' : true,
-    'dragPitch' : true
+    'dragPan': true,
+    'dragRotatePitch': true,
+    'dragRotate': true,
+    'dragPitch': true
 });
 
 Map.addOnLoadHook('addHandler', 'draggable', MapDragHandler);

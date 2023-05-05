@@ -1,4 +1,4 @@
-import { isFunction, isArrayHasData } from '../core/util';
+import { isFunction, isArrayHasData, isNil } from '../core/util';
 import { createFilter, getFilterFeature } from '@maptalks/feature-filter';
 import { getExternalResources } from '../core/util/resource';
 import Coordinate from '../geo/Coordinate';
@@ -342,9 +342,11 @@ class GeometryCollection extends Geometry {
         if (this.isEmpty()) {
             return false;
         }
+        delete this._pickGeometryIndex;
         const geometries = this.getGeometries();
         for (let i = 0, l = geometries.length; i < l; i++) {
             if (geometries[i]._containsPoint(point, t)) {
+                this._pickGeometryIndex = i;
                 return true;
             }
         }
@@ -389,6 +391,7 @@ class GeometryCollection extends Geometry {
         return result;
     }
 
+    //for toGeoJSON
     _exportGeoJSONGeometry() {
         const children = [];
         if (!this.isEmpty()) {
@@ -404,6 +407,36 @@ class GeometryCollection extends Geometry {
             'type': 'GeometryCollection',
             'geometries': children
         };
+    }
+    //for toJSON
+    _toJSON(options) {
+        //Geometry了用的是toGeoJSON(),如果里面包含特殊图形(Circle等),就不能简单的用toGeoJSON代替了，否则反序列化回来就不是原来的图形了
+        const feature = {
+            'type': 'Feature',
+            'geometry': {
+                'type': 'GeometryCollection',
+                'geometries': this.getGeometries().filter(geo => {
+                    return geo && geo._toJSON;
+                }).map(geo => {
+                    const json = geo._toJSON();
+                    if (json.subType) {
+                        return json;
+                    }
+                    return geo._exportGeoJSONGeometry();
+                })
+            }
+        };
+        const id = this.getId();
+        if (!isNil(id)) {
+            feature['id'] = id;
+        }
+        let properties;
+        if (isNil(options['properties']) || options['properties']) {
+            properties = this._exportProperties();
+        }
+        feature['properties'] = properties;
+        options.feature = feature;
+        return options;
     }
 
     _clearProjection() {
@@ -481,7 +514,11 @@ class GeometryCollection extends Geometry {
             geometries[i].startEdit(opts);
         }
         this._editing = true;
-        this.hide();
+        const layer = this.getLayer();
+        const needShadow = layer && layer.options['renderer'] === 'canvas';
+        if (needShadow) {
+            this.hide();
+        }
         setTimeout(() => {
             this.fire('editstart');
         }, 1);
@@ -513,6 +550,13 @@ class GeometryCollection extends Geometry {
         }
         return true;
     }
+
+    // copy() {
+    //     const geometries = this.getGeometries().map(geo => {
+    //         return geo.copy();
+    //     });
+    //     return new GeometryCollection(geometries, extend({}, this.options));
+    // }
 }
 
 GeometryCollection.registerJSONType('GeometryCollection');

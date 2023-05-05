@@ -552,9 +552,7 @@ class Painter extends Class {
             }
         }
         const map = this.getMap();
-        const minAltitude = this.getMinAltitude();
-        const frustumAlt = map.getFrustumAltitude();
-        if (minAltitude && frustumAlt && frustumAlt < minAltitude) {
+        if (this._aboveCamera()) {
             return;
         }
         //Multiplexing offset
@@ -634,7 +632,7 @@ class Painter extends Class {
         }
         Canvas.setHitTesting(true);
         testCanvas.width = testCanvas.height = 2 * tolerance;
-        const ctx = testCanvas.getContext('2d');
+        const ctx = Canvas.getCanvas2DContext(testCanvas);
         try {
             this.paint(null, ctx, this._hitPoint);
         } catch (e) {
@@ -753,8 +751,10 @@ class Painter extends Class {
     }
 
     _aboveCamera() {
-        const altitude = this.getMinAltitude();
+        let altitude = this.getMinAltitude();
         const map = this.getMap();
+        const glRes = map.getGLRes();
+        altitude = map.altitudeToPoint(altitude, glRes) * sign(altitude);
         const frustumAlt = map.getFrustumAltitude();
         return altitude && frustumAlt && frustumAlt < altitude;
     }
@@ -847,7 +847,7 @@ class Painter extends Class {
     }
 
     getAltitude() {
-        const propAlt = this.geometry.getAltitude();
+        const propAlt = this.geometry._getAltitude();
         if (propAlt !== this._propAlt) {
             this._altAtGL = this._getGeometryAltitude();
         }
@@ -876,7 +876,7 @@ class Painter extends Class {
         if (!map) {
             return 0;
         }
-        const altitude = this.geometry.getAltitude();
+        const altitude = this.geometry._getAltitude();
         this._propAlt = altitude;
         if (!altitude) {
             this.minAltitude = this.maxAltitude = 0;
@@ -890,7 +890,7 @@ class Painter extends Class {
             this.minAltitude = Number.MAX_VALUE;
             this.maxAltitude = Number.MIN_VALUE;
             return altitude.map(alt => {
-                const a = this._meterToPoint(center, alt);
+                const a = alt;
                 if (a < this.minAltitude) {
                     this.minAltitude = a;
                 }
@@ -900,15 +900,9 @@ class Painter extends Class {
                 return a;
             });
         } else {
-            this.minAltitude = this.maxAltitude = this._meterToPoint(center, altitude);
+            this.minAltitude = this.maxAltitude = altitude;
             return this.minAltitude;
         }
-    }
-
-    _meterToPoint(center, altitude) {
-        const map = this.getMap();
-        const glRes = map.getGLRes();
-        return map.altitudeToPoint(altitude, glRes) * sign(altitude);
     }
 
     _verifyProjection() {

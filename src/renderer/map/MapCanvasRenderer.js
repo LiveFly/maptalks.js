@@ -5,7 +5,6 @@ import Point from '../../geo/Point';
 import Canvas2D from '../../core/Canvas';
 import MapRenderer from './MapRenderer';
 import Map from '../../map/Map';
-import { getGlobalWorkerPool } from '../../core/worker/WorkerPool';
 
 /**
  * @classdesc
@@ -23,7 +22,6 @@ class MapCanvasRenderer extends MapRenderer {
         super(map);
         //container is a <canvas> element
         this._containerIsCanvas = !!map._containerDOM.getContext;
-        this._thisVisibilitychange = this._onVisibilitychange.bind(this);
         this._registerEvents();
         this._loopTime = 0;
     }
@@ -37,16 +35,16 @@ class MapCanvasRenderer extends MapRenderer {
      * @return {Boolean} return false to cease frame loop
      */
     renderFrame(framestamp) {
-        if (!this.map || !this.map.options['renderable']) {
+        const map = this.map;
+        if (!map || !map.options['renderable']) {
             return false;
         }
         //not render anything when map container is hide
-        if (this._containerIsHide()) {
+        if (map.options['stopRenderOnOffscreen'] && this._containerIsOffscreen()) {
             return true;
         }
         this._updateDomPosition(framestamp);
         delete this._isViewChanged;
-        const map = this.map;
         map._fireEvent('framestart');
         this.updateMapDOM();
         map.clearCollisionIndex();
@@ -57,7 +55,11 @@ class MapCanvasRenderer extends MapRenderer {
             // when updated is false, should escape drawing tops and centerCross to keep handle's alpha
             this.drawTops();
             this._drawCenterCross();
+            if (map.options['debugSky']) {
+                this._debugSky();
+            }
         }
+        this._needClear = false;
         // this._drawContainerExtent();
         // CAUTION: the order to fire frameend and layerload events
         // fire frameend before layerload, reason:
@@ -72,6 +74,8 @@ class MapCanvasRenderer extends MapRenderer {
         this._fireLayerLoadEvents();
         this.executeFrameCallbacks();
         this._canvasUpdated = false;
+        //loop ui Collides
+        map.uiCollides();
         return true;
     }
 
@@ -310,7 +314,7 @@ class MapCanvasRenderer extends MapRenderer {
         if (!map) {
             return false;
         }
-        if (!this.isLayerCanvasUpdated() && !this.isViewChanged()) {
+        if (!this.isLayerCanvasUpdated() && !this.isViewChanged() && this._needClear === false) {
             return false;
         }
         if (!this.canvas) {
@@ -386,6 +390,8 @@ class MapCanvasRenderer extends MapRenderer {
 
     setToRedraw() {
         const layers = this._getAllLayerToRender();
+        //set maprender for clear canvas
+        this._needClear = true;
         for (let i = 0, l = layers.length; i < l; i++) {
             const renderer = layers[i].getRenderer();
             if (renderer && renderer.canvas && renderer.setToRedraw) {
@@ -429,10 +435,15 @@ class MapCanvasRenderer extends MapRenderer {
 
     remove() {
         if (Browser.webgl && typeof document !== 'undefined') {
-            removeDomEvent(document, 'visibilitychange', this._thisVisibilitychange, this);
+            removeDomEvent(document, 'visibilitychange', this._thisDocVisibilitychange, this);
+            removeDomEvent(document, 'dragstart', this._thisDocDragStart, this);
+            removeDomEvent(document, 'dragend', this._thisDocDragEnd, this);
         }
         if (this._resizeInterval) {
             clearInterval(this._resizeInterval);
+        }
+        if (this._resizeObserver) {
+            this._resizeObserver.disconnect();
         }
         delete this.context;
         delete this.canvas;
@@ -612,7 +623,6 @@ class MapCanvasRenderer extends MapRenderer {
         this._frameTimestamp = framestamp;
         this._resizeCount = 0;
         this.renderFrame(framestamp);
-        getGlobalWorkerPool().commit();
         // Keep registering ourselves for the next animation frame
         this._animationFrame = requestAnimFrame((framestamp) => { this._frameLoop(framestamp); });
     }
@@ -758,6 +768,21 @@ class MapCanvasRenderer extends MapRenderer {
         ctx.fillRect(0, top, Math.ceil(clipExtent.getWidth()) * r, Math.ceil(h + fogThickness));
     }
 
+    _debugSky() {
+        const map = this.map;
+        if (!map) {
+            return this;
+        }
+        const height = map.getContainerExtent().ymin;
+        if (height <= 0) {
+            return this;
+        }
+        const ctx = this.context;
+        ctx.strokeStyle = 'red';
+        ctx.strokeRect(0, 0, map.width, height);
+        return this;
+    }
+
     _getAllLayerToRender() {
         return this.map._getLayers();
     }
@@ -895,7 +920,9 @@ class MapCanvasRenderer extends MapRenderer {
         });
 
         if (Browser.webgl && typeof document !== 'undefined') {
-            addDomEvent(document, 'visibilitychange', this._thisVisibilitychange, this);
+            addDomEvent(document, 'visibilitychange', this._thisDocVisibilitychange, this);
+            addDomEvent(document, 'dragstart', this._thisDocDragStart, this);
+            addDomEvent(document, 'dragend', this._thisDocDragEnd, this);
         }
         if (Browser.addDPRListening) {
             Browser.addDPRListening(this.map);
@@ -917,13 +944,6 @@ class MapCanvasRenderer extends MapRenderer {
 
     _getCanvasLayers() {
         return this.map._getLayers(layer => layer.isCanvasRender());
-    }
-
-    _onVisibilitychange() {
-        if (document.visibilityState !== 'visible') {
-            return;
-        }
-        this.setToRedraw();
     }
 
     //----------- top elements methods -------------
@@ -967,19 +987,6 @@ class MapCanvasRenderer extends MapRenderer {
         this.map.fire('drawtopsend');
     }
 
-    //map container is Hide
-    _containerIsHide() {
-        const map = this.map;
-        if (!map) {
-            return true;
-        }
-        const container = map.getContainer();
-        if (!container || !container.style || container.style.display === 'none') {
-            return true;
-        }
-        const minSize = Math.min(container.clientWidth, container.clientHeight);
-        return minSize <= 0;
-    }
 }
 
 Map.registerRenderer('canvas', MapCanvasRenderer);

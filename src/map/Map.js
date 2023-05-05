@@ -26,10 +26,12 @@ import SpatialReference from './spatial-reference/SpatialReference';
 import { computeDomPosition } from '../core/util/dom';
 
 const TEMP_COORD = new Coordinate(0, 0);
+const TEMP_POINT = new Point(0, 0);
+const REDRAW_OPTIONS_PROPERTIES = ['centerCross', 'fog', 'fogColor', 'debugSky'];
 /**
  * @property {Object} options                                   - map's options, options must be updated by config method:<br> map.config('zoomAnimation', false);
  * @property {Boolean} [options.centerCross=false]              - Display a red cross in the center of map
- * @property {Boolean} [options.seamlessZoom=false]             - whether to use seamless zooming mode
+ * @property {Boolean} [options.seamlessZoom=true]             - whether to use seamless zooming mode
  * @property {Boolean} [options.zoomInCenter=false]             - whether to fix in the center when zooming
  * @property {Number}  [options.zoomOrigin=null]                - zoom origin in container point, e.g. [400, 300]
  * @property {Boolean} [options.zoomAnimation=true]             - enable zooming animation
@@ -83,6 +85,7 @@ const TEMP_COORD = new Coordinate(0, 0);
  * @property {Number} [options.devicePixelRatio=null]           - device pixel ratio to override device's default one
  * @property {Number} [options.heightFactor=1]           - the factor for height/altitude calculation,This affects the height calculation of all layers(vectortilelayer/gllayer/threelayer/3dtilelayer)
  * @property {Boolean} [options.cameraInfiniteFar=false]           - Increase camera far plane to infinite. Enable this option may reduce map's performance.
+ * @property {Boolean} [options.stopRenderOnOffscreen=true]           - whether to stop map rendering when container is offscreen
  * @memberOf Map
  * @instance
  */
@@ -135,7 +138,11 @@ const options = {
     'cascadePitches': [10, 60],
     'renderable': true,
 
-    'clickTimeThreshold': 280
+    'clickTimeThreshold': 280,
+
+    'stopRenderOnOffscreen': true,
+    'preventWheelScroll': true,
+    'preventTouch': true,
 };
 
 /**
@@ -238,6 +245,7 @@ class Map extends Handlerable(Eventable(Renderable(Class))) {
         this.setMaxExtent(opts['maxExtent']);
 
         this._Load();
+        this.proxyOptions();
     }
 
     /**
@@ -381,6 +389,21 @@ class Map extends Handlerable(Eventable(Renderable(Class))) {
         if (!isNil(ref)) {
             this._updateSpatialReference(ref, null);
         }
+        let needUpdate = false;
+        for (let i = 0, len = REDRAW_OPTIONS_PROPERTIES.length; i < len; i++) {
+            const key = REDRAW_OPTIONS_PROPERTIES[i];
+            if (!isNil(conf[key])) {
+                needUpdate = true;
+                break;
+            }
+        }
+        if (!needUpdate) {
+            return this;
+        }
+        const renderer = this.getRenderer();
+        if (renderer) {
+            renderer.setToRedraw();
+        }
         return this;
     }
 
@@ -448,7 +471,13 @@ class Map extends Handlerable(Eventable(Renderable(Class))) {
             return this._center;
         }
         const projection = this.getProjection();
-        return projection.unproject(this._prjCenter);
+        const center = projection.unproject(this._prjCenter);
+        center.x = Math.round(center.x * 1E8) / 1E8;
+        center.y = Math.round(center.y * 1E8) / 1E8;
+        if (this.centerAltitude) {
+            center.z = this.centerAltitude;
+        }
+        return center;
     }
 
     /**
@@ -1178,11 +1207,14 @@ class Map extends Handlerable(Eventable(Renderable(Class))) {
             if (renderer) {
                 renderer.setLayerCanvasUpdated();
             }
-            this.once('frameend', () => {
-                removed.forEach(layer => {
-                    layer.fire('remove');
-                });
+            removed.forEach(layer => {
+                layer.fire('remove');
             });
+            // this.once('frameend', () => {
+            //     removed.forEach(layer => {
+            //         layer.fire('remove');
+            //     });
+            // });
         }
         /**
          * removelayer event, fired when removing layers.
@@ -1549,6 +1581,11 @@ class Map extends Handlerable(Eventable(Renderable(Class))) {
 
     onMoveEnd(param) {
         this._moving = false;
+        if (!this._suppressRecenter) {
+            this._recenterOnTerrain();
+        }
+
+
         this._trySetCursor('default');
         /**
          * moveend event
@@ -1939,7 +1976,7 @@ class Map extends Handlerable(Eventable(Renderable(Class))) {
     }
 
     _setPrjCoordAtContainerPoint(coordinate, point) {
-        if (point.x === this.width / 2 && point.y === this.height / 2) {
+        if (!this.centerAltitude && point.x === this.width / 2 && point.y === this.height / 2) {
             return this;
         }
         const t = this._containerPointToPoint(point)._sub(this._prjToPoint(this._getPrjCenter()));
@@ -1969,10 +2006,10 @@ class Map extends Handlerable(Eventable(Renderable(Class))) {
      * @returns {Coordinate} the new projected center.
      */
     _offsetCenterByPixel(pixel) {
-        const pos = new Point(this.width / 2 - pixel.x, this.height / 2 - pixel.y);
-        const pCenter = this._containerPointToPrj(pos);
-        this._setPrjCenter(pCenter);
-        return pCenter;
+        const pos = TEMP_POINT.set(this.width / 2 - pixel.x, this.height / 2 - pixel.y);
+        const coord = this._containerPointToPrj(pos, TEMP_COORD);
+        const containerCenter = TEMP_POINT.set(this.width / 2, this.height / 2);
+        this._setPrjCoordAtContainerPoint(coord, containerCenter);
     }
 
     /**
@@ -2155,6 +2192,26 @@ class Map extends Handlerable(Eventable(Renderable(Class))) {
             proto._onLoadHooks[i].call(this);
         }
     }
+    //fix prj value when current view is world wide
+    _fixPrjOnWorldWide(prjCoord) {
+        const projection = this.getProjection();
+        if (projection && projection.fullExtent && prjCoord) {
+            const { left, bottom, top, right } = projection.fullExtent || {};
+            if (isNumber(left)) {
+                prjCoord.x = Math.max(left, prjCoord.x);
+            }
+            if (isNumber(right)) {
+                prjCoord.x = Math.min(right, prjCoord.x);
+            }
+            if (isNumber(bottom)) {
+                prjCoord.y = Math.max(bottom, prjCoord.y);
+            }
+            if (isNumber(top)) {
+                prjCoord.y = Math.min(top, prjCoord.y);
+            }
+        }
+        return this;
+    }
 }
 
 Map.include(/** @lends Map.prototype */{
@@ -2324,7 +2381,7 @@ Map.include(/** @lends Map.prototype */{
                 const pCoordinate = projection.project(coordinates[i], prjOut);
                 let point = transformation.transform(pCoordinate, resolution);
                 point = point._multi(res);
-                this._toContainerPoint(point, isTransforming, res, 0, centerPoint);
+                this._toContainerPoint(point, isTransforming, coordinates[i].z, centerPoint);
                 pts.push(point);
             }
             return pts;
@@ -2459,6 +2516,14 @@ Map.include(/** @lends Map.prototype */{
         };
     }(),
 
+    pointAtResToAltitude: function () {
+        const DEFAULT_CENTER = new Coordinate(0, 40);
+        return function (point = 0, res, originCenter) {
+            const altitude = this.pointAtResToDistance(point, 0, res, originCenter || DEFAULT_CENTER);
+            return altitude;
+        };
+    }(),
+
 
     /**
      * Converts pixel size to geographical distance.
@@ -2471,6 +2536,8 @@ Map.include(/** @lends Map.prototype */{
     pixelToDistance: function () {
         const COORD0 = new Coordinate(0, 0);
         const COORD1 = new Coordinate(0, 0);
+        const TARGET0 = new Coordinate(0, 0);
+        const TARGET1 = new Coordinate(0, 0);
         return function (width, height) {
             const projection = this.getProjection();
             if (!projection) {
@@ -2478,9 +2545,12 @@ Map.include(/** @lends Map.prototype */{
             }
             const fullExt = this.getFullExtent();
             const d = fullExt['top'] > fullExt['bottom'] ? -1 : 1;
-            const target = COORD0.set(this.width / 2 + width, this.height / 2 + d * height);
-            const coord = this.containerPointToCoord(target, COORD1);
-            return projection.measureLength(this.getCenter(), coord);
+            const coord0 = COORD0.set(this.width / 2, this.height / 2);
+            const coord1 = COORD1.set(this.width / 2 + width, this.height / 2 + d * height);
+            // 考虑高度海拔后，容器中心点的坐标就不一定是center了
+            const target0 = this.containerPointToCoord(coord0, TARGET0);
+            const target1 = this.containerPointToCoord(coord1, TARGET1);
+            return projection.measureLength(target0, target1);
         };
     }(),
 
@@ -2509,16 +2579,20 @@ Map.include(/** @lends Map.prototype */{
      */
     pointAtResToDistance: function () {
         const POINT = new Point(0, 0);
-        const COORD = new Coordinate(0, 0);
-        return function (dx, dy, res) {
+        const PRJ_COORD = new Coordinate(0, 0);
+        const COORD0 = new Coordinate(0, 0);
+        const COORD1 = new Coordinate(0, 0);
+        return function (dx, dy, res, paramCenter) {
             const projection = this.getProjection();
             if (!projection) {
                 return null;
             }
-            const c = this._prjToPointAtRes(this._getPrjCenter(), res, POINT);
+            const prjCoord = paramCenter ? projection.project(paramCenter, PRJ_COORD) : this._getPrjCenter();
+            const c = this._prjToPointAtRes(prjCoord, res, POINT);
             c._add(dx, dy);
-            const target = this.pointAtResToCoord(c, res, COORD);
-            return projection.measureLength(this.getCenter(), target);
+            const target = this.pointAtResToCoord(c, res, COORD0);
+            const src = paramCenter ? paramCenter : projection.unproject(prjCoord, COORD1);
+            return projection.measureLength(src, target);
         };
     }(),
 
