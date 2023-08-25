@@ -50,6 +50,7 @@ class GeometryCollection extends Geometry {
         const geometries = this._checkGeometries(_geometries || []);
         const symbol = this._getSymbol();
         const options = this.config();
+        const properties = this.getProperties();
         //Set the collection as child geometries' parent.
         for (let i = geometries.length - 1; i >= 0; i--) {
             geometries[i]._initOptions(options);
@@ -57,6 +58,9 @@ class GeometryCollection extends Geometry {
             geometries[i]._setEventParent(this);
             if (symbol) {
                 geometries[i].setSymbol(symbol);
+            }
+            if (properties) {
+                geometries[i].setProperties(properties);
             }
         }
         this._geometries = geometries;
@@ -224,12 +228,14 @@ class GeometryCollection extends Geometry {
         if (s && s['children']) {
             this._symbol = null;
             this.forEach((g, i) => {
+                g._eventSymbolProperties = this._eventSymbolProperties;
                 g.setSymbol(s['children'][i]);
             });
         } else {
             const symbol = this._prepareSymbol(s);
             this._symbol = symbol;
             this.forEach(g => {
+                g._eventSymbolProperties = this._eventSymbolProperties;
                 g.setSymbol(symbol);
             });
         }

@@ -54,10 +54,13 @@ export default class StrokeAndFillSymbolizer extends CanvasSymbolizer {
         if (checkGradient(style['polygonFill'])) {
             style['polygonGradientExtent'] = this.geometry.getContainerExtent();
         }
+        // const lineWidth = style['lineWidth'] || 1;
+        const geometryEventTolerance = this.geometry.getLayer().options['geometryEventTolerance'] || 0;
+        const tolerance = this.geometry._hitTestTolerance() + geometryEventTolerance;
 
         const points = paintParams[0],
             isSplitted = (this.geometry.getJSONType() === 'Polygon' && points.length > 0 && Array.isArray(points[0][0])) ||
-            (this.geometry.type === 'LineString' && points.length > 0 && Array.isArray(points[0]));
+                (this.geometry.type === 'LineString' && points.length > 0 && Array.isArray(points[0]));
 
         if (isSplitted) {
             for (let i = 0; i < points.length; i++) {
@@ -70,7 +73,9 @@ export default class StrokeAndFillSymbolizer extends CanvasSymbolizer {
                     params.push.apply(params, paintParams.slice(1));
                 }
                 params.push(style['lineOpacity'], style['polygonOpacity'], style['lineDasharray']);
-                this.geometry._paintOn.apply(this.geometry, params);
+                const bbox = this.geometry._paintOn.apply(this.geometry, params);
+                this._setBBOX(ctx, bbox);
+                this._bufferBBOX(ctx, tolerance);
             }
         } else {
             this.prepareCanvas(ctx, style, resources);
@@ -80,7 +85,9 @@ export default class StrokeAndFillSymbolizer extends CanvasSymbolizer {
             const params = [ctx];
             params.push.apply(params, paintParams);
             params.push(style['lineOpacity'], style['polygonOpacity'], style['lineDasharray']);
-            this.geometry._paintOn.apply(this.geometry, params);
+            const bbox = this.geometry._paintOn.apply(this.geometry, params);
+            this._setBBOX(ctx, bbox);
+            this._bufferBBOX(ctx, tolerance);
         }
 
         if (ctx.setLineDash && Array.isArray(style['lineDasharray'])) {
@@ -138,15 +145,15 @@ export default class StrokeAndFillSymbolizer extends CanvasSymbolizer {
             'lineCap': getValueOrDefault(s['lineCap'], 'butt'), //“butt”, “square”, “round”
             'lineJoin': getValueOrDefault(s['lineJoin'], 'miter'), //“bevel”, “round”, “miter”
             'linePatternFile': getValueOrDefault(s['linePatternFile'], null),
-            'lineDx' : getValueOrDefault(s['lineDx'], 0),
-            'lineDy' : getValueOrDefault(s['lineDy'], 0),
+            'lineDx': getValueOrDefault(s['lineDx'], 0),
+            'lineDy': getValueOrDefault(s['lineDy'], 0),
             'polygonFill': getValueOrDefault(s['polygonFill'], null),
             'polygonOpacity': getValueOrDefault(s['polygonOpacity'], 1),
             'polygonPatternFile': getValueOrDefault(s['polygonPatternFile'], null),
-            'polygonPatternDx' : getValueOrDefault(s['polygonPatternDx'], 0),
-            'polygonPatternDy' : getValueOrDefault(s['polygonPatternDy'], 0),
-            'linePatternDx' : getValueOrDefault(s['linePatternDx'], 0),
-            'linePatternDy' : getValueOrDefault(s['linePatternDy'], 0)
+            'polygonPatternDx': getValueOrDefault(s['polygonPatternDx'], 0),
+            'polygonPatternDy': getValueOrDefault(s['polygonPatternDy'], 0),
+            'linePatternDx': getValueOrDefault(s['linePatternDx'], 0),
+            'linePatternDy': getValueOrDefault(s['linePatternDy'], 0)
         };
         if (result['lineWidth'] === 0) {
             result['lineOpacity'] = 0;

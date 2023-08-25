@@ -985,6 +985,9 @@ class Geometry extends JSONAble(Eventable(Handlerable(Class))) {
 
     //bind the geometry to a layer
     _bindLayer(layer) {
+        if (layer === this.getLayer()) {
+            return;
+        }
         //check dupliaction
         if (this.getLayer()) {
             throw new Error('Geometry cannot be added to two or more layers at the same time.');
@@ -1234,7 +1237,7 @@ class Geometry extends JSONAble(Eventable(Handlerable(Class))) {
         }
         const e = {};
         if (this._eventSymbolProperties) {
-            e.properties = extend({}, this._eventSymbolProperties);
+            e.properties = JSON.parse(JSON.stringify(this._eventSymbolProperties));
             delete this._eventSymbolProperties;
         } else {
             delete this._textDesc;
@@ -1393,8 +1396,7 @@ class Geometry extends JSONAble(Eventable(Handlerable(Class))) {
     }
 
     _hitTestTolerance() {
-        const layer = this.getLayer();
-        return layer && layer.options['geometryEventTolerance'] || 0;
+        return 0;
     }
 
 

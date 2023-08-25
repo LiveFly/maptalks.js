@@ -1,4 +1,4 @@
-import { extend, isFunction, isNumber, sign } from '../core/util';
+import { extend, isFunction, isNumber } from '../core/util';
 import { trim } from '../core/util/strings';
 import {
     on,
@@ -14,6 +14,7 @@ import Class from '../core/Class';
 import Eventable from '../core/Eventable';
 import Size from '../geo/Size';
 import Geometry from '../geometry/Geometry';
+import Coordinate from '../geo/Coordinate';
 
 /**
  * @property {Object} options
@@ -33,6 +34,7 @@ import Geometry from '../geometry/Geometry';
  * @property {Number}  [options.collisionBufferSize=2]  - collision buffer size
  * @property {Number}  [options.collisionWeight=0]  - Collision weight, large priority collision
  * @property {Boolean}  [options.collisionFadeIn=false]  - Collision fade in animation
+ * @property {Number}  [options.zIndex=0]  - dom zindex
  * @memberOf ui.UIComponent
  * @instance
  */
@@ -54,7 +56,8 @@ const options = {
     'collision': false,
     'collisionBufferSize': 2,
     'collisionWeight': 0,
-    'collisionFadeIn': false
+    'collisionFadeIn': false,
+    'zIndex': 0
 };
 
 /**
@@ -182,6 +185,9 @@ class UIComponent extends Eventable(Class) {
         this.options['visible'] = true;
 
         coordinate = coordinate || this._coordinate || this._owner.getCenter();
+        if (!(coordinate instanceof Coordinate)) {
+            coordinate = new Coordinate(coordinate);
+        }
 
         const visible = this.isVisible();
 
@@ -206,6 +212,7 @@ class UIComponent extends Eventable(Class) {
         const dom = this.__uiDOM = this.buildOn(map);
         dom['eventsPropagation'] = this.options['eventsPropagation'];
         this._observerDomSize(dom);
+        const zIndex = this.options.zIndex;
         if (!dom) {
             /**
              * showend event.
@@ -219,6 +226,7 @@ class UIComponent extends Eventable(Class) {
                 this.fire('showend');
             }
             this._collides();
+            this.setZIndex(zIndex);
             return this;
         }
 
@@ -263,10 +271,10 @@ class UIComponent extends Eventable(Class) {
             on(dom, this.options['eventsToStop'], stopPropagation);
         }
 
-        //autoPan
-        if (this.options['autoPan']) {
-            this._autoPan();
-        }
+        // //autoPan
+        // if (this.options['autoPan']) {
+        //     this._autoPan();
+        // }
 
         const transition = anim.transition;
         if (anim.ok && transition) {
@@ -288,6 +296,14 @@ class UIComponent extends Eventable(Class) {
             this.fire('showend');
         }
         this._collides();
+        //autoPan
+        clearTimeout(this._autoPanId);
+        if (this.options['autoPan']) {
+            this._autoPanId = setTimeout(() => {
+                this._autoPan();
+            }, 32);
+        }
+        this.setZIndex(zIndex);
         return this;
     }
 
@@ -412,8 +428,31 @@ class UIComponent extends Eventable(Class) {
         return this._owner;
     }
 
+    /**
+     * get Dom Node
+     * @returns {HTMLDivElement} dom|null
+     */
     getDOM() {
         return this.__uiDOM;
+    }
+
+    /**
+     * set Dom Node zIndex
+     *
+     */
+    setZIndex(zIndex) {
+        if (!isNumber(zIndex)) {
+            return this;
+        }
+        const dom = this.getDOM();
+        if (!dom) {
+            return this;
+        }
+        dom.style.zIndex = zIndex;
+        if (zIndex !== this.options.zIndex) {
+            this.options.zIndex = zIndex;
+        }
+        return this;
     }
 
     _roundPoint(point) {
@@ -479,19 +518,49 @@ class UIComponent extends Eventable(Class) {
     }
 
     _meterToPoint(center, altitude) {
-        const map = this.getMap();
-        return map.altitudeToPoint(altitude, map._getResolution()) * sign(altitude);
+        return altitude;
+        // const map = this.getMap();
+        // return map.altitudeToPoint(altitude, map._getResolution()) * sign(altitude);
     }
 
     _autoPan() {
         const map = this.getMap(),
             dom = this.getDOM();
-        if (map.isMoving()) {
+        if (!dom || !map || map.isMoving()) {
             return;
         }
         const point = this._getViewPoint()._round();
         const mapWidth = map.width;
         const mapHeight = map.height;
+        if (dom && dom.getBoundingClientRect) {
+            const margin = 50;
+            const rect = dom.getBoundingClientRect();
+            let offsetX = 0, offsetY = 0;
+            const { left, right, top, bottom, width, height } = rect;
+            if (width > 0 && height > 0) {
+                if (left < margin) {
+                    offsetX = margin - left;
+                }
+                if (offsetX === 0 && (right + margin) > mapWidth) {
+                    offsetX = -((right + margin) - mapWidth);
+                }
+                if (top < margin) {
+                    offsetY = margin - top;
+                }
+                if (offsetY === 0 && (bottom + margin) > mapHeight) {
+                    offsetY = -((bottom + margin) - mapHeight);
+                }
+                if (offsetX !== 0 || offsetY !== 0) {
+                    const pitch = map.getPitch();
+                    if (pitch > 40 && offsetY !== 0 && this._coordinate) {
+                        map.animateTo({ center: this._coordinate }, { duration: map.options['panAnimationDuration'] });
+                    } else {
+                        map.panBy([Math.ceil(offsetX), Math.ceil(offsetY)]);
+                    }
+                }
+                return;
+            }
+        }
 
         const containerPoint0 = map.viewPointToContainerPoint(point);
         const offset = this.getOffset();

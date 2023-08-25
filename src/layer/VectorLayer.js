@@ -25,9 +25,10 @@ const TEMP_EXTENT = new PointExtent();
  * @property {Boolean} [options.roundPoint=false]  - round point before painting to improve performance, but will cause geometry shaking in animation
  * @property {Number} [options.altitude=0]           - layer altitude
  * @property {Boolean} [options.debug=false]         - whether the geometries on the layer is in debug mode.
- * @property {Boolean} [options.geometryEventTolerance=1]         - tolerance for geometry events
  * @property {Boolean}  [options.collision=false]  - whether collision
  * @property {Number}  [options.collisionBufferSize=2]  - collision buffer size
+ * @property {Number}  [options.collisionDelay=250]  - collision delay time when map Interacting
+ * @property {String}  [options.collisionScope=layer]  - Collision range:layer or map
  * @memberOf VectorLayer
  * @instance
  */
@@ -44,9 +45,10 @@ const options = {
     'roundPoint': false,
     'altitude': 0,
     'clipBBoxBufferSize': 3,
-    'geometryEventTolerance': 1,
     'collision': false,
-    'collisionBufferSize': 2
+    'collisionBufferSize': 2,
+    'collisionDelay': 250,
+    'collisionScope': 'layer'
 };
 // Polyline is for custom line geometry
 // const TYPES = ['LineString', 'Polyline', 'Polygon', 'MultiLineString', 'MultiPolygon'];
@@ -165,6 +167,14 @@ class VectorLayer extends OverlayLayer {
             const geo = geometries[i];
             if (!geo || !geo.isVisible() || !geo._getPainter() || !geo.options['interactive']) {
                 continue;
+            }
+            const painter = geo._getPainter();
+            const bbox = painter.getRenderBBOX && painter.getRenderBBOX();
+            if (bbox) {
+                const { x, y } = cp;
+                if (x < bbox[0] || y < bbox[1] || x > bbox[2] || y > bbox[3]) {
+                    continue;
+                }
             }
             if (!(geo instanceof LineString) || (!geo._getArrowStyle() && !(geo instanceof Curve))) {
                 // Except for LineString with arrows or curves

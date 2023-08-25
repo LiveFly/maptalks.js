@@ -1,4 +1,4 @@
-import { IS_NODE, extend, isInteger, log2, isNil } from '../../core/util';
+import { IS_NODE, extend, isInteger, isNil, isNumber } from '../../core/util';
 import { createGLContext, createProgram, enableVertexAttrib } from '../../core/util/gl';
 import Browser from '../../core/Browser';
 import * as mat4 from '../../core/util/mat4';
@@ -33,7 +33,7 @@ const shaders = {
         uniform float u_opacity;
         uniform float u_debug_line;
         uniform vec4 u_base_color;
-
+        uniform float u_alpha_test;
         varying vec2 v_texCoord;
 
         void main() {
@@ -43,6 +43,9 @@ const shaders = {
                 gl_FragColor = texture2D(u_image, v_texCoord) * u_opacity;
             }
             gl_FragColor *= u_base_color;
+            if (gl_FragColor.a < u_alpha_test) {
+                discard;
+            }
         }
     `
 };
@@ -86,6 +89,25 @@ const ImageGLRenderable = Base => {
             }
             v3[0] = x || 0;
             v3[1] = y || 0;
+            v3[2] = 0;
+            const layer = this.layer;
+            if (layer) {
+                const { altitude } = layer.options;
+                const altIsNumber = isNumber(altitude);
+                if (!altIsNumber) {
+                    this._layerAlt = 0;
+                }
+                //update _layerAlt cache
+                if (this._layerAltitude !== altitude && altIsNumber) {
+                    const map = layer.getMap();
+                    if (map) {
+                        const z = map.altitudeToPoint(altitude, map.getGLRes());
+                        this._layerAltitude = altitude;
+                        this._layerAlt = z;
+                    }
+                }
+            }
+            v3[2] = this._layerAlt || 0;
             const uMatrix = mat4.identity(arr16);
             mat4.translate(uMatrix, uMatrix, v3);
             mat4.scale(uMatrix, uMatrix, [scale, scale, 1]);
@@ -94,6 +116,7 @@ const ImageGLRenderable = Base => {
             gl.uniform1f(this.program['u_opacity'], opacity);
             gl.uniform1f(this.program['u_debug_line'], 0);
             gl.uniform4fv(this.program['u_base_color'], baseColor || DEFAULT_BASE_COLOR);
+            gl.uniform1f(this.program['u_alpha_test'], this.layer.options['alphaTest'] || 0);
 
             const { glBuffer } = image;
             if (glBuffer && (glBuffer.width !== w || glBuffer.height !== h)) {
@@ -110,6 +133,8 @@ const ImageGLRenderable = Base => {
             v2[1] = 2;
             v2[2] = image.glBuffer.type;
             this.enableVertexAttrib(v2); // ['a_position', 3]
+            // gl.bindBuffer(gl.ARRAY_BUFFER, this.texBuffer);
+            // this.enableVertexAttrib(['a_texCoord', 2, 'UNSIGNED_BYTE']);
             gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
             if (debug) {
@@ -133,6 +158,7 @@ const ImageGLRenderable = Base => {
             gl.uniform1f(this.program['u_opacity'], 1);
             gl.uniform1f(this.program['u_debug_line'], 1);
             gl.uniform4fv(this.program['u_base_color'], DEFAULT_BASE_COLOR);
+            gl.uniform1f(this.program['u_alpha_test'], this.layer.options['alphaTest'] || 0);
             gl.drawArrays(gl.LINE_STRIP, 0, 5);
             //draw debug info
             let canvas = this._debugInfoCanvas;
@@ -327,10 +353,11 @@ const ImageGLRenderable = Base => {
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-            if (isInteger(log2(image.width)) && isInteger(log2(image.width))) {
-                gl.generateMipmap(gl.TEXTURE_2D);
+            if (!isPowerOfTwo(image.width) || !isPowerOfTwo(image.height)) {
+                image = resize(image);
             }
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+            gl.generateMipmap(gl.TEXTURE_2D);
 
             return texture;
         }
@@ -361,6 +388,7 @@ const ImageGLRenderable = Base => {
          * @returns {WebGLTexture}
          */
         loadTexture(image) {
+            const map = this.getMap();
             const gl = this.gl;
             let texture = image.texture;   // Create a texture object
             if (!texture) {
@@ -368,6 +396,12 @@ const ImageGLRenderable = Base => {
                 image.texture = texture;
             }
             gl.bindTexture(gl.TEXTURE_2D, texture);
+            if (map.getRenderer().isViewChanged()) {
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+            } else {
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            }
+
             return texture;
         }
 
@@ -594,3 +628,30 @@ const ImageGLRenderable = Base => {
 };
 
 export default ImageGLRenderable;
+
+function resize(image) {
+    if (isPowerOfTwo(image.width) && isPowerOfTwo(image.height)) {
+        return image;
+    }
+    let width = image.width;
+    let height = image.height;
+    if (!isPowerOfTwo(width)) {
+        width = floorPowerOfTwo(width);
+    }
+    if (!isPowerOfTwo(height)) {
+        height = floorPowerOfTwo(height);
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d').drawImage(image, 0, 0, width, height);
+    return canvas;
+}
+
+export function isPowerOfTwo(value) {
+    return (value & (value - 1)) === 0 && value !== 0;
+}
+
+export function floorPowerOfTwo(value) {
+    return Math.pow(2, Math.floor(Math.log(value) / Math.LN2));
+}

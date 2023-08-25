@@ -10,7 +10,7 @@ const TEMP_EXTENT = new PointExtent();
 const TEMP_VEC3 = [];
 const TEMP_FIXEDEXTENT = new PointExtent();
 const PLACEMENT_CENTER = 'center';
-const collisionIndex = new CollisionIndex();
+const tempCollisionIndex = new CollisionIndex();
 
 
 /**
@@ -24,8 +24,12 @@ const collisionIndex = new CollisionIndex();
  */
 class VectorLayerRenderer extends OverlayLayerCanvasRenderer {
 
-    _geoIsCollision(geo) {
+    _geoIsCollision(geo, collisionIndex) {
         if (!geo) {
+            return false;
+        }
+        const collision = geo.options.collision;
+        if (!collision) {
             return false;
         }
         const type = geo.getType();
@@ -157,7 +161,20 @@ class VectorLayerRenderer extends OverlayLayerCanvasRenderer {
             this._drawnRes = res;
         }
         this._sortByDistanceToCamera(map.cameraPosition);
-        this._collidesGeos();
+        const { collision, collisionDelay } = this.layer.options;
+        if (collision) {
+            const time = now();
+            if (!this._lastCollisionTime) {
+                this._lastCollisionTime = time;
+            }
+            if (time - this._lastCollisionTime <= collisionDelay) {
+                this._geosToDraw = this._lastGeosToDraw || this._geosToDraw;
+            } else {
+                this._collidesGeos();
+                this._lastCollisionTime = time;
+            }
+        }
+
         for (let i = 0, l = this._geosToDraw.length; i < l; i++) {
             const geo = this._geosToDraw[i];
             if (!geo._isCheck) {
@@ -174,7 +191,9 @@ class VectorLayerRenderer extends OverlayLayerCanvasRenderer {
             this._geosToDraw[i]._inCurrentView = undefined;
         }
         this.clearImageData();
+        this._lastGeosToDraw = this._geosToDraw;
     }
+
 
     /**
      * Show and render
@@ -208,11 +227,27 @@ class VectorLayerRenderer extends OverlayLayerCanvasRenderer {
             this._geosToDraw[i]._inCurrentView = undefined;
         }
         this.clearImageData();
+        this._lastGeosToDraw = this._geosToDraw;
+        this._setDrawGeosDrawTime();
     }
 
     prepareToDraw() {
+        this.layer._drawTime = now();
         this._hasPoint = false;
         this._geosToDraw = [];
+        return this;
+    }
+
+    _setDrawGeosDrawTime() {
+        const drawTime = this.layer._drawTime;
+        for (let i = 0, len = this._geosToDraw.length; i < len; i++) {
+            const geo = this._geosToDraw[i];
+            const painter = geo._painter;
+            if (painter && painter._setDrawTime) {
+                painter._setDrawTime(drawTime);
+            }
+        }
+        return this;
     }
 
     checkGeo(geo) {
@@ -259,11 +294,16 @@ class VectorLayerRenderer extends OverlayLayerCanvasRenderer {
         if (!collision) {
             return this;
         }
-        collisionIndex.clear();
+        const collisionScope = this.layer.options['collisionScope'];
+        const map = this.layer.getMap();
+        const collisionIndex = collisionScope === 'map' ? map.getCollisionIndex() : tempCollisionIndex;
+        if (collisionIndex === tempCollisionIndex) {
+            collisionIndex.clear();
+        }
         const geos = this._geosToDraw;
         this._geosToDraw = [];
         for (let i = 0, len = geos.length; i < len; i++) {
-            if (this._geoIsCollision(geos[i])) {
+            if (this._geoIsCollision(geos[i], collisionIndex)) {
                 continue;
             }
             this._geosToDraw.push(geos[i]);

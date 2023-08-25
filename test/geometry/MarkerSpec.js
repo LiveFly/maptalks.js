@@ -124,6 +124,34 @@ describe('Geometry.Marker', function () {
             expect(marker.getSize().toArray()).to.be.eql([30, 22]);
         });
 
+        it('should draw icon marker with vector marker added, #2035', function (done) {
+            var marker = new maptalks.Marker(center, {
+                symbol: {
+                    markerFile: 'resources/infownd-close-hover.png',
+                    markerWidth: 30,
+                    markerHeight: 22
+                }
+            });
+            var vlayer = new maptalks.VectorLayer('id1', [marker], { 'drawImmediate': true }).addTo(map);
+            vlayer.once('layerload', function () {
+                expect(vlayer).to.be.painted(0, -3);
+                done();
+            });
+            var marker1 = new maptalks.Marker(
+                center.sub(0.009, 0),
+                {
+                  'symbol' : {
+                    'markerType'   : 'ellipse',
+                    'markerWidth'  : 28,
+                    'markerHeight' : 40,
+                    'markerDx'     : 0,
+                    'markerDy'     : 100000,
+                    'markerOpacity': 1
+                  }
+                }
+              ).addTo(vlayer);
+        });
+
         it('can be text', function () {
             var marker = new maptalks.Marker(center, {
                 symbol: {
@@ -636,7 +664,8 @@ describe('Geometry.Marker', function () {
             var count = 0;
             layer.on('layerload', function () {
                 count++;
-                if (count === 2) {
+                // change from 2 to 3 as CanvasRenderer has one more setToRedraw
+                if (count === 3) {
                     expect(layer).to.be.painted(0, -3, [255, 255, 0]);
                     done();
                 }
@@ -843,7 +872,7 @@ describe('Geometry.Marker', function () {
             var marker = new maptalks.Marker(map.getCenter());
             marker.rotate(10, map.getCenter().sub(1, 1));
             var newCoords = marker.getCoordinates().toArray();
-            expect(newCoords).to.be.eql([118.62842615843942, 32.17932019579001]);
+            expect(newCoords).to.be.eql([118.62842615841328, 32.17932019575247]);
         });
     });
 });

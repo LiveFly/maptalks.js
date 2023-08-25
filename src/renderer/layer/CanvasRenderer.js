@@ -40,7 +40,7 @@ class CanvasRenderer extends Class {
         this.layer = layer;
         this._painted = false;
         this._drawTime = 0;
-        if (Browser.decodeImageInWorker && (layer.options['renderer'] === 'gl' || !Browser.safari && !Browser.iosWeixin)) {
+        if (Browser.decodeImageInWorker && !Browser.safari && !Browser.iosWeixin) {
             this._resWorkerConn = new ResourceWorkerConnection();
         }
         this.setToRedraw();
@@ -82,7 +82,12 @@ class CanvasRenderer extends Class {
                          * @property {Layer} target    - layer
                          */
                         this.layer.fire('resourceload');
+                        const map = this.layer.getMap();
                         this.setToRedraw();
+                        map.getRenderer().callInNextFrame(() => {
+                            // sometimes renderer still fails to fetch loaded images, an additional frame will solved it
+                            this.setToRedraw();
+                        });
                     }
                 });
             } else {
@@ -217,6 +222,10 @@ class CanvasRenderer extends Class {
             this.resources.remove();
         }
         delete this.resources;
+        if (this._resWorkerConn) {
+            this._resWorkerConn.remove();
+            delete this._resWorkerConn;
+        }
         delete this.layer;
     }
 
@@ -767,15 +776,17 @@ class CanvasRenderer extends Class {
     }
 
     _promiseResource(url) {
+        const layer = this.layer;
         const me = this, resources = this.resources,
-            crossOrigin = this.layer.options['crossOrigin'];
-        const renderer = this.layer.options['renderer'] || '';
+            crossOrigin = layer.options['crossOrigin'];
+        const renderer = layer.options['renderer'] || '';
         return function (resolve) {
             if (resources.isResourceLoaded(url, true)) {
                 resolve(url);
                 return;
             }
-            if (!isSVG(url[0]) && me._resWorkerConn) {
+            const fetchInWorker = !isSVG(url[0]) && me._resWorkerConn && (layer.options['renderer'] !== 'canvas' || layer.options['decodeImageInWorker']);
+            if (fetchInWorker) {
                 const uri = getAbsoluteURL(url[0]);
                 me._resWorkerConn.fetchImage(uri, (err, data) => {
                     if (err) {
@@ -864,7 +875,7 @@ export class ResourceCache {
             height: +url[2],
             refCnt: 0
         };
-        if (img && !img.close && Browser.imageBitMap && !Browser.safari && !Browser.iosWeixin) {
+        if (img && img.width && img.height && !img.close && Browser.imageBitMap && !Browser.safari && !Browser.iosWeixin) {
             if (img.src && isSVG(img.src)) {
                 return;
             }
@@ -906,6 +917,9 @@ export class ResourceCache {
     logout(url) {
         const res = this.resources[url];
         if (res && res.refCnt-- <= 0) {
+            if (res.image && res.image.close) {
+                res.image.close();
+            }
             delete this.resources[url];
         }
     }
@@ -980,8 +994,11 @@ function (exports) {
 
     function requestImageOffscreen(url, cb, fetchOptions) {
         fetch(url, fetchOptions ? fetchOptions : {})
-            .then(response => response.blob())
-            .then(blob => createImageBitmap(blob))
+            .then(response => response.arrayBuffer())
+            .then(arrayBuffer => {
+                const blob=new Blob([arrayBuffer]);
+                return createImageBitmap(blob);
+            })
             .then(bitmap => {
                 cb(null, {data:bitmap});
             }).catch(err => {
