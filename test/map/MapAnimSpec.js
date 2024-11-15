@@ -10,13 +10,13 @@ describe('Map.Anim', function () {
         container.style.height = '2px';
         document.body.appendChild(container);
         var option = {
-            zoomAnimation:false,
+            zoomAnimation: false,
             zoom: 17,
             center: center,
-            baseLayer : new maptalks.TileLayer('tile', {
-                urlTemplate : TILE_IMAGE,
+            baseLayer: new maptalks.TileLayer('tile', {
+                urlTemplate: TILE_IMAGE,
                 subdomains: [1, 2, 3],
-                renderer:'canvas'
+                renderer: 'canvas'
             })
         };
         map = new maptalks.Map(container, option);
@@ -32,7 +32,6 @@ describe('Map.Anim', function () {
         var zoom = map.getZoom() - 1;
         var pitch = map.getPitch() + 10;
         var bearing = map.getBearing() + 60;
-        map.getBaseLayer().config('durationToAnimate', 300);
         map.on('animateend', function () {
             expect(map.getCenter().toArray()).to.be.closeTo(center.toArray());
             expect(map.getZoom()).to.be.eql(zoom);
@@ -41,12 +40,12 @@ describe('Map.Anim', function () {
             done();
         });
         map.animateTo({
-            center : center,
-            zoom : zoom,
-            pitch : pitch,
-            bearing : bearing
+            center: center,
+            zoom: zoom,
+            pitch: pitch,
+            bearing: bearing
         }, {
-            'duration' : 300
+            'duration': 300
         });
     });
 
@@ -55,7 +54,6 @@ describe('Map.Anim', function () {
         var zoom = map.getZoom() - 1;
         var pitch = map.getPitch() + 10;
         var bearing = map.getBearing() + 60;
-        map.getBaseLayer().config('durationToAnimate', 300);
         map.on('animateend', function () {
             expect(map.getCenter().toArray()).to.be.closeTo(center.toArray());
             expect(map.getZoom()).to.be.eql(zoom);
@@ -64,43 +62,41 @@ describe('Map.Anim', function () {
             done();
         });
         map.flyTo({
-            center : center,
-            zoom : zoom,
-            pitch : pitch,
-            bearing : bearing
+            center: center,
+            zoom: zoom,
+            pitch: pitch,
+            bearing: bearing
         }, {
-            'duration' : 300
+            'duration': 300
         });
     });
 
     it('rotate', function (done) {
         var pitch = map.getPitch() + 10;
         var bearing = map.getBearing() + 60;
-        map.getBaseLayer().config('durationToAnimate', 300);
         map.on('animateend', function () {
             expect(map.getPitch()).to.be.eql(pitch);
             expect(map.getBearing()).to.be.approx(bearing);
             done();
         });
         map.animateTo({
-            pitch : pitch,
-            bearing : bearing
+            pitch: pitch,
+            bearing: bearing
         }, {
-            'duration' : 300
+            'duration': 300
         });
     });
 
     it('zoomOut', function (done) {
         var zoom = map.getZoom() - 5;
-        map.getBaseLayer().config('durationToAnimate', 300);
         map.on('animateend', function () {
             expect(map.getZoom()).to.be.eql(zoom);
             done();
         });
         map.animateTo({
-            zoom : zoom
+            zoom: zoom
         }, {
-            'duration' : 300
+            'duration': 300
         });
     });
 
@@ -108,15 +104,14 @@ describe('Map.Anim', function () {
         map.config('zoomable', false);
         var cur = map.getZoom();
         var zoom = map.getZoom() - 5;
-        map.getBaseLayer().config('durationToAnimate', 300);
         map.on('animateend', function () {
             expect(map.getZoom()).to.be.eql(cur);
             done();
         });
         map.animateTo({
-            zoom : zoom
+            zoom: zoom
         }, {
-            'duration' : 300
+            'duration': 300
         });
     });
 
@@ -163,9 +158,9 @@ describe('Map.Anim', function () {
             }
         });
         map.animateTo({
-            zoom : zoom
+            zoom: zoom
         }, {
-            'duration' : 300
+            'duration': 300
         });
         setTimeout(function () {
             happen.once(container, {
@@ -173,5 +168,173 @@ describe('Map.Anim', function () {
                 detail: 100
             });
         }, 100);
+    });
+
+
+    it('bearing>180', function (done) {
+        const bearing = 180 + Math.floor(Math.random() * 180);
+        map.setView({
+            bearing
+        });
+        setTimeout(() => {
+            expect(map.getBearing().toFixed(0)).to.be.eql(-180 + (Math.abs(bearing) - 180));
+            done();
+        }, 100);
+    });
+
+    it('bearing<-180', function (done) {
+        const bearing = -180 - Math.floor(Math.random() * 180);
+        map.setView({
+            bearing
+        });
+        setTimeout(() => {
+            expect(map.getBearing().toFixed(0)).to.be.eql(180 - (Math.abs(bearing) - 180));
+            done();
+        }, 100);
+    });
+
+    it('#1888 animateTo repeat', function (done) {
+
+        function animateTo(callback) {
+            map.animateTo(
+                {
+                    bearing: 269,
+                    duration: 400,
+                    callName: "setAzimuthalAngle",
+                }, {
+
+            }, frame => {
+                if (frame.state.playState === 'finished') {
+                    callback();
+                }
+            }
+            )
+        }
+        var spy = sinon.spy();
+        map.on('rotate', spy);
+        animateTo(() => {
+            expect(spy.called).to.be.ok();
+            var spy1 = sinon.spy();
+            map.on('rotate', spy1);
+            animateTo(() => {
+                expect(spy1.called).not.to.be.ok();
+                done();
+            });
+        });
+    });
+
+
+    it('bearing > 180 and current bearing>0', function (done) {
+        map.setView({
+            bearing: 175
+        })
+        const bearing = 180 + Math.floor(Math.random() * 180);
+        map.animateTo(
+            {
+                bearing,
+
+                // callName: "setAzimuthalAngle",
+            },
+            {
+                duration: 1000,
+            },
+            frame => {
+                if (frame.state.playState === 'finished') {
+                    expect(frame.styles.bearing.toFixed(0)).to.be.eql(bearing);
+                    done();
+                }
+            }
+        )
+    });
+
+    it('bearing <180 and current bearing<0', function (done) {
+        map.setView({
+            bearing: -175
+        })
+        const bearing = -180 - Math.floor(Math.random() * 180);
+        map.animateTo(
+            {
+                bearing,
+
+                // callName: "setAzimuthalAngle",
+            },
+            {
+                duration: 1000,
+            },
+            frame => {
+                if (frame.state.playState === 'finished') {
+                    expect(frame.styles.bearing.toFixed(0)).to.be.eql(bearing);
+                    done();
+                }
+            }
+        )
+    });
+
+    it('#851 bearing counterclockwise', function (done) {
+        map.setView({
+            bearing: -178
+        })
+        map.animateTo(
+            {
+                bearing: 177,
+
+                // callName: "setAzimuthalAngle",
+            }, {
+            duration: 1000,
+            counterclockwise: true
+        },
+            frame => {
+                if (frame.state.playState === 'finished') {
+                    expect(frame.styles.bearing.toFixed(0)).to.be.eql(-183);
+                    done();
+                }
+            }
+        )
+    });
+
+    it('bearing counterclockwise current bearing>0 and bearing>0', function (done) {
+        map.setView({
+            bearing: 0
+        })
+        const bearing = Math.floor(Math.random() * 180);
+        map.animateTo(
+            {
+                bearing,
+
+                // callName: "setAzimuthalAngle",
+            }, {
+            duration: 1000,
+            counterclockwise: true
+        },
+            frame => {
+                if (frame.state.playState === 'finished') {
+                    expect(frame.styles.bearing.toFixed(0)).to.be.eql(-(360 - bearing));
+                    done();
+                }
+            }
+        )
+    });
+
+    it('bearing counterclockwise current bearing<0 and bearing<0', function (done) {
+        map.setView({
+            bearing: 0
+        })
+        const bearing = -Math.floor(Math.random() * 180);
+        map.animateTo(
+            {
+                bearing,
+
+                // callName: "setAzimuthalAngle",
+            }, {
+            duration: 1000,
+            counterclockwise: true
+        },
+            frame => {
+                if (frame.state.playState === 'finished') {
+                    expect(frame.styles.bearing.toFixed(0)).to.be.eql(360 + bearing);
+                    done();
+                }
+            }
+        )
     });
 });

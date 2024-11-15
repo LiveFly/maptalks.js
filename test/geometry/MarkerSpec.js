@@ -14,7 +14,7 @@ describe('Geometry.Marker', function () {
         container = setups.container;
         map = setups.map;
         map.config('centerCross', true);
-        canvasContainer = map._panels.front;
+        canvasContainer = map.getPanels().front;
         layer = new maptalks.VectorLayer('v').addTo(map);
     });
 
@@ -140,16 +140,16 @@ describe('Geometry.Marker', function () {
             var marker1 = new maptalks.Marker(
                 center.sub(0.009, 0),
                 {
-                  'symbol' : {
-                    'markerType'   : 'ellipse',
-                    'markerWidth'  : 28,
-                    'markerHeight' : 40,
-                    'markerDx'     : 0,
-                    'markerDy'     : 100000,
-                    'markerOpacity': 1
-                  }
+                    'symbol': {
+                        'markerType': 'ellipse',
+                        'markerWidth': 28,
+                        'markerHeight': 40,
+                        'markerDx': 0,
+                        'markerDy': 100000,
+                        'markerOpacity': 1
+                    }
                 }
-              ).addTo(vlayer);
+            ).addTo(vlayer);
         });
 
         it('can be text', function () {
@@ -874,5 +874,110 @@ describe('Geometry.Marker', function () {
             var newCoords = marker.getCoordinates().toArray();
             expect(newCoords).to.be.eql([118.62842615841328, 32.17932019575247]);
         });
+    });
+
+    //https://github.com/maptalks/issues/issues/422
+    it('marker size when textSize missing', function (done) {
+        const texts = ['Maptalks', 'Hello\nWorld', Math.random() * 100, '中国人', '没有设置textSize时', '没有设置textSize时\nmarker的getSize方法返回的值不正确 '];
+        function createMaker(text, textSize) {
+            const symbol = {
+                textName: text,
+                textFill: 'red',
+                textSize: textSize
+            };
+            if (!symbol.textSize) {
+                delete symbol.textSize;
+            }
+            return new maptalks.Marker(map.getCenter(), {
+                symbol
+            });
+        }
+
+        function getMarkerWidth(marker) {
+            return Math.round(marker.getSize().width);
+        }
+
+        texts.forEach(text => {
+            layer.clear();
+            const marker1 = createMaker(text, 14);
+            marker1.addTo(layer);
+            const marker2 = createMaker(text);
+            marker2.addTo(layer);
+            const w1 = getMarkerWidth(marker1);
+            const w2 = getMarkerWidth(marker2);
+            expect(w1).to.be.eql(w2);
+        });
+        done();
+    });
+
+    it('#2175 marker ContainerExtent when markerWidth/markerHeight/textSize =0', function (done) {
+        const imageSymbol = {
+            markerWidth: 10,
+            markerHeight: 10,
+            'markerFile': 'resources/tile.png',
+        };
+
+        const pathSymbol = {
+            'markerType': 'path',
+            'markerPath': [{
+                'path': 'M8 23l0 0 0 0 0 0 0 0 0 0c-4,-5 -8,-10 -8,-14 0,-5 4,-9 8,-9l0 0 0 0c4,0 8,4 8,9 0,4 -4,9 -8,14z M3,9 a5,5 0,1,0,0,-0.9Z',
+                'fill': '#DE3333'
+            }],
+            'markerPathWidth': 16,
+            'markerPathHeight': 23,
+            'markerWidth': 8,
+            'markerHeight': 20,
+        };
+
+        const vectorSymbol = {
+            markerType: 'ellipse',
+            markerWidth: 10,
+            markerHeight: 10
+        };
+
+        const textSymbol = {
+            textSize: 12,
+            textName: 'hello'
+        };
+
+        const symbols = [imageSymbol, pathSymbol, vectorSymbol, textSymbol];
+
+        let idx = 0;
+
+        function test() {
+            layer.clear();
+            if (idx < symbols.length) {
+                const symbol = symbols[idx];
+                const isText = symbol.textSize !== undefined;
+                const point = new maptalks.Marker(map.getCenter(), {
+                    symbol: symbol
+                })
+                point.addTo(layer);
+                setTimeout(() => {
+                    const extent = point.getContainerExtent();
+                    expect(extent.getWidth()).not.to.be.eql(0);
+                    expect(extent.getHeight()).not.to.be.eql(0);
+
+                    if (isText) {
+                        symbol.textSize = 0;
+                        point.setSymbol(symbol)
+                    } else {
+                        symbol.markerWidth = 0;
+                        point.setSymbol(symbol)
+                    }
+
+                    setTimeout(() => {
+                        const extent = point.getContainerExtent();
+                        expect(extent.getWidth()).to.be.eql(0);
+                        expect(extent.getHeight()).to.be.eql(0);
+                        idx++;
+                        test();
+                    }, 50);
+                }, 50);
+            } else {
+                done();
+            }
+        }
+        test();
     });
 });

@@ -41,6 +41,39 @@ describe('TileLayer', function () {
             map.addLayer(tile);
         });
 
+        it('ensure tile renderer methods have correct parameters', function (done) {
+            createMap();
+            var tile = new maptalks.TileLayer('tile', {
+                renderer : 'canvas',
+                urlTemplate : TILE_IMAGE
+            });
+            var flag0 = false;
+            var flag1 = false;
+            var flag2 = false;
+            tile.on('layerload', function () {
+                if (flag0 && flag1 && flag2) {
+                    done();
+                } else {
+                    tile.getRenderer().setToRedraw();
+                }
+            });
+            map.addLayer(tile);
+            const renderer = tile.getRenderer();
+            renderer.isTileComplete = (tile) => {
+                flag0 = !!tile;
+                return true;
+            };
+            renderer.checkTileInQueue = (image, info) => {
+                flag1 = !!image && !!info;
+                return true;
+            };
+            const drawTiles = renderer._drawTiles;
+            renderer._drawTiles = (...args) => {
+                flag2 = args.length === 7;
+                return drawTiles.apply(renderer, args);
+            }
+        });
+
         it('add again', function (done) {
             this.timeout(9500);
             createMap();
@@ -131,6 +164,22 @@ describe('TileLayer', function () {
                 urlTemplate : '#'
             }).addTo(map);
             expect(tile.getTiles().tileGrids[0].tiles.length).to.be.eql(2);
+        });
+
+        it('getTiles when zoomOffset is not zero, #1839', function () {
+            createMap('1414px', '1271px');
+            map.setView({
+                center: [-0.113049, 51.498568],
+                zoom: 7,
+                pitch: 69,
+            });
+            var tile = new maptalks.TileLayer('tile', {
+                tileSize: 512,
+                zoomOffset: -1,
+                renderer : 'canvas',
+                urlTemplate : '#'
+            }).addTo(map);
+            expect(tile.getTiles().tileGrids[0].tiles.length).to.be.eql(26);
         });
 
         it('tiles out of extent', function () {

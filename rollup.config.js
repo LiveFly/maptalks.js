@@ -1,8 +1,11 @@
-const commonjs = require('rollup-plugin-commonjs'),
-    resolve = require('rollup-plugin-node-resolve'),
-    babel = require('rollup-plugin-babel'),
-    json = require('rollup-plugin-json');
+const commonjs = require('@rollup/plugin-commonjs'),
+    resolve = require('@rollup/plugin-node-resolve'),
+    babel = require('@rollup/plugin-babel'),
+    json = require('@rollup/plugin-json'),
+    typescript = require('@rollup/plugin-typescript'),
+    terser = require('@rollup/plugin-terser');
 const pkg = require('./package.json');
+const { dts } = require("rollup-plugin-dts");
 
 const testing = process.env.BUILD === 'test';
 const dev = process.env.BUILD === 'dev';
@@ -10,10 +13,11 @@ const dev = process.env.BUILD === 'dev';
 const isDebug = testing || dev;
 const plugins = testing ?
     [
-        ['istanbul', {
-            // TileLayerGLRenderer is not testable on CI
-            exclude: ['test/**/*.js', 'src/core/mapbox/*.js', 'src/util/dom.js', 'src/renderer/layer/tilelayer/TileLayerGLRenderer.js', 'src/renderer/layer/ImageGLRenderable.js', 'node_modules/**/*']
-        }]]
+        // ['istanbul', {
+        //     // TileLayerGLRenderer is not testable on CI
+        //     exclude: ['test/**/*.js', 'src/core/mapbox/*.js', 'src/util/dom.js', 'src/renderer/layer/tilelayer/TileLayerGLRenderer.js', 'src/renderer/layer/ImageGLRenderable.js', 'node_modules/**/*']
+        // }]
+    ]
     :
     [];
 
@@ -29,19 +33,36 @@ const rollupPlugins = [
         main: true
     }),
     commonjs(),
+    typescript({
+         sourceMap: true
+    }),
     babel({
-        plugins
+        extensions: [".ts"],
+        babelHelpers: 'bundled'
     })
 ];
-const external = ['rbush', 'frustum-intersects', 'simplify-js', 'zousan'];
+
+// const compilePlugins = [
+//     babel({
+//         plugins,
+//         babelHelpers: 'bundled'
+//     })
+// ];
+
+// if (!isDebug) {
+//     rollupPlugins.push(terser(), ...compilePlugins)
+// } else {
+//     rollupPlugins.push(...compilePlugins);
+// }
+// const external = ['rbush', 'frustum-intersects', 'simplify-js'];
 
 const builds = [
     {
-        input: 'src/index.js',
+        input: 'src/index.ts',
         plugins: rollupPlugins,
         output: [
             {
-                'sourcemap': isDebug,
+                'sourcemap': true,
                 'format': 'umd',
                 'name': 'maptalks',
                 banner,
@@ -50,35 +71,50 @@ const builds = [
             }
         ]
     },
+    // {
+    //     input: 'dist/index.d.ts',
+    //     plugins: [dts()],
+    //     output: [
+    //         {
+    //             'sourcemap': true,
+    //             'format': 'es',
+    //             'name': 'maptalks',
+    //             banner,
+    //             'file': pkg['d.ts']
+    //         }
+    //     ]
+    // },
     {
-        input: 'src/index.js',
-        plugins: rollupPlugins,
-        external,
+        input: 'src/index.ts',
+        plugins: rollupPlugins.concat([terser()]),
         output: [
             {
                 'sourcemap': false,
-                'format': 'es',
+                'format': 'umd',
+                'name': 'maptalks',
                 banner,
-                'file': pkg.module
+                outro,
+                'file': pkg.minify
             }
         ]
     },
     //for browser esm
     {
-        input: 'src/index.js',
+        input: 'src/index.ts',
         plugins: rollupPlugins,
         output: [
             {
-                'sourcemap': false,
+                'sourcemap': true,
                 'format': 'es',
                 banner,
                 'file': pkg.module_browser
             }
         ]
-    }];
+    }
+];
 
 if (isDebug) {
-    module.exports = [builds[0]];
+    module.exports = builds.slice(0, 1);
 } else {
     module.exports = builds;
 }

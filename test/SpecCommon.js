@@ -107,7 +107,7 @@ function COMMON_CREATE_MAP(center, baseLayer, options) {
     if (baseLayer) {
         option.baseLayer = baseLayer;
     }
-    maptalks.Browser.isTest = true;
+    maptalks.GlobalConfig.isTest = true;
     var map = new maptalks.Map(container, option);
     return {
         'container': container,
@@ -290,7 +290,7 @@ COMMON_GEOEVENTS_TESTOR.prototype = {
         vector.on(this.eventsToTest, this._eventCallBack);
         layer.addGeometry(vector);
         var point = map.coordinateToContainerPoint(testPoint);
-        var dom = map._panels.front;
+        var dom = map.getPanels().front;
         var domPosition = GET_PAGE_POSITION(dom);
         point._add(domPosition);
         this._verifyGeometryEvents(dom,
@@ -347,5 +347,14 @@ function mapMousemove(map, steps, callback) {
             callback()
         }
     })
+}
+
+function coordinate2PointWidthAltitude(map, coordinate) {
+    const glRes = map.getGLRes();
+    //coordinates to glpoint
+    const renderPoints = map.coordToPointAtRes(coordinate, glRes);
+    const altitude = coordinate.z || 0;
+    const point = map._pointAtResToContainerPoint(renderPoints, glRes, altitude);
+    return point;
 }
 /*eslint-enable no-unused-vars */

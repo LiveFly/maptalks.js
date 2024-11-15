@@ -12,7 +12,7 @@ describe('Map.Drag', function () {
         var domPosition = GET_PAGE_POSITION(container);
         var point = map.coordinateToContainerPoint(center).add(domPosition);
 
-        happen.mousedown(map._panels.front, {
+        happen.mousedown(map.getPanels().front, {
             'clientX':point.x,
             'clientY':point.y
         });
@@ -92,7 +92,7 @@ describe('Map.Drag', function () {
         var center = map.getCenter();
         var point = map.coordinateToContainerPoint(center).add(domPosition);
 
-        happen.mousedown(map._panels.front, {
+        happen.mousedown(map.getPanels().front, {
             'clientX':point.x,
             'clientY':point.y,
             'button' : 2
@@ -152,7 +152,7 @@ describe('Map.Drag', function () {
             expect(e.domEvent.touches.length).to.be.eql(1);
         });
 
-        happen.once(map._panels.mapWrapper, {
+        happen.once(map.getPanels().mapWrapper, {
             'type' : 'touchstart',
             'touches' : [
                 {
@@ -162,7 +162,7 @@ describe('Map.Drag', function () {
             ]
         });
         for (var i = 0; i < 10; i++) {
-            happen.once(map._panels.mapWrapper, {
+            happen.once(map.getPanels().mapWrapper, {
                 'type' : 'touchmove',
                 'touches' : [
                     {
@@ -172,7 +172,7 @@ describe('Map.Drag', function () {
                 ]
             })
         }
-        happen.once(map._panels.mapWrapper, {
+        happen.once(map.getPanels().mapWrapper, {
             'type' : 'touchend',
             'changedTouches' : [
                 {
@@ -186,5 +186,26 @@ describe('Map.Drag', function () {
         expect(called).to.be.ok();
         expect(center2.toArray()).not.to.be.eql(center.toArray());
         expect(map.isMoving()).not.to.be.ok();
+    });
+
+    it('synchronize with mouse when dragging map', (done) => {
+        map.setPitch(45);
+        //vlayer用于模拟鼠标的位置和高度
+        const vlayer = new maptalks.VectorLayer('v').addTo(map);
+        vlayer.queryTerrainAtPoint = function(containerPoint) {
+            const coord = map.containerPointToCoordinate(containerPoint);
+            return new maptalks.Coordinate(coord.x, coord.y - 0.2, 100);
+        };
+        vlayer.getTerrainLayer = function() {
+            return true;
+        }
+        map.on('moveend', function () {
+            expect(map.isMoving()).not.to.be.ok();
+            const center = map.getCenter();
+            expect(center.x).to.eql(118.84825216);
+            expect(center.y).to.eql(31.28637643);
+            done();
+        });
+        dragMap(100);
     });
 });

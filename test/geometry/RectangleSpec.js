@@ -15,7 +15,7 @@ describe('Geometry.Rectangle', function () {
         map = setups.map;
         layer = new maptalks.VectorLayer('id');
         map.addLayer(layer);
-        canvasContainer = map._panels.allLayers;
+        canvasContainer = map.getPanels().allLayers;
     });
 
     afterEach(function () {
@@ -82,6 +82,19 @@ describe('Geometry.Rectangle', function () {
         var points = rect.getShell();
 
         expect(points).to.have.length(5);
+        expect(points[0]).to.eql(points[4]);
+    });
+
+    it('getShell with altitude', function () {
+        var rect = new maptalks.Rectangle({ x: 0, y: 0, z: 100 }, 200, 100);
+        layer.addGeometry(rect);
+        var points = rect.getShell();
+
+        expect(points).to.have.length(5);
+        expect(points[0].z).to.be.eql(100);
+        expect(points[1].z).to.be.eql(100);
+        expect(points[2].z).to.be.eql(100);
+        expect(points[3].z).to.be.eql(100);
         expect(points[0]).to.eql(points[4]);
     });
 
@@ -293,9 +306,9 @@ describe('Geometry.Rectangle', function () {
             });
             expect(rectangle.getShell().map(function (c) { return c.toArray() })).to.be.eql([
                 [0, 0],
-                [100, 0, 0],
-                [100, -500, 0],
-                [0, -500, 0],
+                [100, 0],
+                [100, -500],
+                [0, -500],
                 [0, 0]
             ]);
         });
@@ -317,9 +330,9 @@ describe('Geometry.Rectangle', function () {
             });
             expect(rectangle.getShell().map(function (c) { return c.toArray() })).to.be.eql([
                 [0, 0],
-                [100, 0, 0],
-                [100, 500, 0],
-                [0, 500, 0],
+                [100, 0],
+                [100, 500],
+                [0, 500],
                 [0, 0]
             ]);
         })

@@ -13,7 +13,7 @@ describe('Geometry.Events', function () {
         container = setups.container;
         map = setups.map;
         map.config('onlyVisibleGeometryEvents', false);
-        eventContainer = map._panels.canvasContainer;
+        eventContainer = map.getPanels().canvasContainer;
         layer = new maptalks.VectorLayer('vector');
         map.addLayer(layer);
     });
@@ -322,7 +322,7 @@ describe('Geometry.Events', function () {
                 markerHeight: 40
             },
             {
-                markerFile: 'resources/infownd-close-hover.png',
+                markerFile: 'resources/2.png',
                 markerWidth: 40,
                 markerHeight: 40
             },
@@ -461,4 +461,126 @@ describe('Geometry.Events', function () {
         }
         test();
     });
+
+    it('#2103 mouseout when no others mouse events', function (done) {
+        var circle = new maptalks.Circle(map.getCenter(), 10);
+        circle.addTo(layer);
+        var domPosition = GET_PAGE_POSITION(container);
+        var point = map.coordinateToContainerPoint(center).add(domPosition);
+        circle.on('mouseout', function (param) {
+            expect(param.type).to.be.eql('mouseout');
+            done();
+        });
+
+        happen.mousemove(eventContainer, {
+            'clientX': point.x,
+            'clientY': point.y
+        });
+
+        setTimeout(() => {
+            happen.mousemove(eventContainer, {
+                'clientX': point.x + 100,
+                'clientY': point.y + 100
+            });
+        }, 50);
+    });
+
+    it('#2148 geometry cursor when listens is empty', function (done) {
+        var circle = new maptalks.Circle(map.getCenter(), 10, { cursor: 'zoom-in' });
+        circle.addTo(layer);
+        var domPosition = GET_PAGE_POSITION(container);
+        var point = map.coordinateToContainerPoint(center).add(domPosition);
+
+        happen.mousemove(eventContainer, {
+            'clientX': point.x,
+            'clientY': point.y
+        });
+        setTimeout(() => {
+            happen.mousemove(eventContainer, {
+                'clientX': point.x + 2,
+                'clientY': point.y + 2
+            });
+
+            setTimeout(() => {
+                expect(map._priorityCursor).to.be.eql('zoom-in');
+                done();
+            }, 100);
+        }, 16);
+    });
+
+    it('#2144 sector startAngle and endAngle<0', function (done) {
+        var sector = new maptalks.Sector(center, 100, -250, -220);
+        sector.addTo(layer);
+        map.setZoom(17);
+        var domPosition = GET_PAGE_POSITION(container);
+        var point = map.coordinateToContainerPoint(center).add(domPosition);
+        sector.on('click', function (param) {
+            expect(param.type).to.be.eql('click');
+            done();
+        });
+        setTimeout(() => {
+            happen.click(eventContainer, {
+                'clientX': point.x - 20,
+                'clientY': point.y - 30
+            });
+        }, 100);
+    });
+    it('#2144 sector random startAngle endAngle', function (done) {
+        map.setZoom(17);
+        const count = 100;
+        var domPosition = GET_PAGE_POSITION(container);
+        var point = map.coordinateToContainerPoint(center).add(domPosition);
+        const r = 20;
+        let idx = 0;
+        function test() {
+            if (idx < count) {
+                layer.clear();
+                const startAngle = Math.random() * 360 - 360;
+                const endAngle = startAngle + Math.random() * 330 + 15;
+                var sector = new maptalks.Sector(center, 100, startAngle, endAngle);
+                sector.addTo(layer);
+
+                const [a1, a2] = sector._correctAngles();
+
+                const rad = -(a1 + a2) / 2 / 180 * Math.PI;
+                const x = Math.cos(rad) * r, y = Math.sin(rad) * r;
+
+                setTimeout(() => {
+                    sector.on('click', function (param) {
+                        expect(param.type).to.be.eql('click');
+                        idx++;
+                        test();
+                    });
+                    happen.click(eventContainer, {
+                        'clientX': point.x + x,
+                        'clientY': point.y + y
+                    });
+                }, 20);
+            } else {
+                done();
+            }
+        }
+        test();
+
+    });
+
+    it('#2386 Geometry event result point2d attribute typo ', function (done) {
+        var circle = new maptalks.Circle(map.getCenter(), 10);
+        circle.addTo(layer);
+        var domPosition = GET_PAGE_POSITION(container);
+        var point = map.coordinateToContainerPoint(center).add(domPosition);
+        // var spy = sinon.spy();
+        circle.on('click', (e) => {
+            expect(e).to.have.property('point2d');
+            expect(e.point2d).to.be.an(maptalks.Point);
+            done();
+        });
+
+        happen.click(eventContainer, {
+            'clientX': point.x,
+            'clientY': point.y
+        });
+
+    });
+
 });

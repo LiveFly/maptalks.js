@@ -5,17 +5,18 @@ describe('Geometry.Polygon', function () {
     var center = new maptalks.Coordinate(118.846825, 32.046534);
     var layer;
     var canvasContainer;
-
+    var eventContainer;
     beforeEach(function () {
         var setups = COMMON_CREATE_MAP(center, null, {
-            width : 800,
-            height : 600
+            width: 800,
+            height: 600
         });
         container = setups.container;
         map = setups.map;
         layer = new maptalks.VectorLayer('id');
         map.addLayer(layer);
-        canvasContainer = map._panels.canvasContainer;
+        canvasContainer = map.getPanels().canvasContainer;
+        eventContainer = canvasContainer;
     });
 
     afterEach(function () {
@@ -185,7 +186,7 @@ describe('Geometry.Polygon', function () {
             ]]);
             layer.addGeometry(polygon);
 
-            expect(polygon.getCenter()).to.be.closeTo({ x:5, y: 5 });
+            expect(polygon.getCenter()).to.be.closeTo({ x: 5, y: 5 });
         });
     });
 
@@ -247,8 +248,8 @@ describe('Geometry.Polygon', function () {
         ]], {
             symbol: {
                 'lineWidth': 6,
-                'polygonOpacity' : 0,
-                'lineOpacity' : 0
+                'polygonOpacity': 0,
+                'lineOpacity': 0
             }
         });
         layer.addGeometry(geometry);
@@ -278,7 +279,7 @@ describe('Geometry.Polygon', function () {
             new maptalks.Coordinate([center.x + 0.002, center.y])
         ]], {
             symbol: {
-                'lineWidth': { stops : [[0, 1], [12, 8]] }
+                'lineWidth': { stops: [[0, 1], [12, 8]] }
             }
         });
         layer.addGeometry(geometry);
@@ -298,14 +299,14 @@ describe('Geometry.Polygon', function () {
             layer.config('drawImmediate', true);
             var center = map.getCenter();
             var line = new maptalks.Polygon([
-                    center.sub(0.001, 0),
-                    center.add(0.001, 0),
-                    center.add(0.001, -0.001)
-                ], {
-                smoothness : 0.5,
-                symbol : {
-                    'lineColor' : '#000',
-                    'lineWidth' : 8
+                center.sub(0.001, 0),
+                center.add(0.001, 0),
+                center.add(0.001, -0.001)
+            ], {
+                smoothness: 0.5,
+                symbol: {
+                    'lineColor': '#000',
+                    'lineWidth': 8
                 }
             }).addTo(layer);
             expect(layer).not.to.be.painted(0, 0);
@@ -319,16 +320,16 @@ describe('Geometry.Polygon', function () {
             layer.config('drawImmediate', true);
             var center = map.getCenter();
             var line = new maptalks.Polygon([
-                    center.sub(0.001, 0),
-                    center.add(0.001, 0),
-                    center.add(0.001, -0.001)
-                ], {
-                symbol : {
-                    'lineColor' : '#000',
-                    'lineWidth' : 8
+                center.sub(0.001, 0),
+                center.add(0.001, 0),
+                center.add(0.001, -0.001)
+            ], {
+                symbol: {
+                    'lineColor': '#000',
+                    'lineWidth': 8
                 }
             }).addTo(layer);
-            var outline = line.getOutline().updateSymbol({ polygonFill : '#0f0' }).addTo(layer);
+            var outline = line.getOutline().updateSymbol({ polygonFill: '#0f0' }).addTo(layer);
             expect(layer).not.to.be.painted(0, -20);
             expect(layer).to.be.painted(0, 10, [0, 255, 0]);
         });
@@ -344,14 +345,14 @@ describe('Geometry.Polygon', function () {
                 symbol: {
                     'lineWidth': 6
                 },
-                visible : false
+                visible: false
             });
             layer.once('layerload', function () {
                 var geojson = polygon.toGeoJSON();
                 expect(layer._getRenderer().isBlank()).to.be.ok();
                 polygon.animateShow({
-                    'duration' : 100,
-                    'easing' : 'out'
+                    'duration': 100,
+                    'easing': 'out'
                 }, function (frame) {
                     if (frame.state.playState !== 'finished') {
                         expect(polygon.toGeoJSON()).not.to.be.eql(geojson);
@@ -366,7 +367,7 @@ describe('Geometry.Polygon', function () {
 
         });
         it('The current coordinate should be on the line along the polygon', function (done) {
-             var polygon = new maptalks.Polygon([[
+            var polygon = new maptalks.Polygon([[
                 new maptalks.Coordinate([center.x, center.y]),
                 new maptalks.Coordinate([center.x, center.y + 0.001]),
                 new maptalks.Coordinate([center.x + 0.001, center.y + 0.001]),
@@ -376,16 +377,16 @@ describe('Geometry.Polygon', function () {
                 symbol: {
                     'lineWidth': 2
                 },
-                visible : false
+                visible: false
             });
             layer.once('layerload', function () {
                 expect(layer._getRenderer().isBlank()).to.be.ok();
                 polygon.animateShow({
-                    'duration' : 100,
-                    'easing' : 'out'
+                    'duration': 100,
+                    'easing': 'out'
                 }, function (frame, curCoord) {
                     if (frame.state.playState !== 'finished') {
-                        if(curCoord.x > center.x) {
+                        if (curCoord.x > center.x) {
                             expect(curCoord.x < center.x + 0.001 && curCoord.y >= center.y).to.be.true;
                         }
                     } else {
@@ -396,5 +397,173 @@ describe('Geometry.Polygon', function () {
             });
             layer.addGeometry(polygon).addTo(map);
         });
+    });
+
+    it('#2068 linedasharray not work when polygon has hole', function (done) {
+        layer.config('drawImmediate', true);
+        layer.clear();
+        map.config({ centerCross: true });
+
+        const symbol = {
+            lineColor: '#666',
+            lineWidth: 10,
+            lineOpacity: 1,
+            lineDasharray: [10, 10],
+            // polygonFill: '#fff'
+        };
+
+        const geometry = new maptalks.Polygon([
+            [[117.5, 39.5], [118.5, 39.5], [118.5, 40.5], [117.5, 40.5]],
+            [[117.8, 39.8], [118.2, 39.8], [118.2, 40.2], [117.8, 40.2]]
+        ], { symbol: symbol }).addTo(layer);
+        layer.addGeometry(geometry);
+        map.setView({
+            center: [118.01171892, 40.20102198],
+            zoom: 10.090885072616922,
+            pitch: 0,
+            bearing: 0
+        });
+        setTimeout(() => {
+            expect(layer).to.be.painted(0, 0);
+            expect(layer).not.to.be.painted(-4, 0);
+            done();
+        }, 100);
+
+    });
+
+
+    it('polygon sub geometries(Rectange/Ellipse/Sector) rotate', function (done) {
+        layer.config('drawImmediate', true);
+        layer.clear();
+        map.config({ centerCross: true });
+        map.setCenter(center);
+        map.setZoom(17);
+
+        const symbol = {
+            polygonFill: '#fff',
+            lineWidth: 8
+            // polygonFill: '#fff'
+        };
+
+        const angles = [];
+        while (angles.length < 10) {
+            angles.push(Math.random() * 180);
+        }
+
+        const rectangle = new maptalks.Rectangle(center.copy(), 200, 100, {
+            symbol
+        });
+        const ellipse = new maptalks.Ellipse(center.copy(), 200, 100, {
+            symbol
+        });
+        const sector = new maptalks.Sector(center.copy(), 100, 0, 90, {
+            symbol
+        });
+
+        const geos = [rectangle, ellipse, sector];
+
+        function getTopPrj(geo) {
+            const prjs = geo._getPrjShell();
+            let topPrj = prjs[0];
+            for (let i = 0, len = prjs.length; i < len; i++) {
+                const { x, y } = prjs[i];
+                if (y > topPrj.y) {
+                    topPrj = prjs[i];
+                }
+            }
+            return topPrj;
+        }
+
+        let idx = 0;
+        const load = () => {
+            if (idx < geos.length) {
+                layer.clear();
+                const geo = geos[idx];
+                geo.addTo(layer);
+
+                let i = 0;
+                const rotate = () => {
+                    if (i < angles.length) {
+                        const angle = angles[i];
+                        geo.rotate(angle);
+                        const topPrj = getTopPrj(geo);
+                        const coordinate = geo._getProjection().unproject(topPrj);
+                        const pixel = map.coordinateToContainerPoint(coordinate);
+                        setTimeout(() => {
+                            const size = map.getSize();
+                            const cx = size.width / 2, cy = size.height / 2;
+                            const x = pixel.x - cx, y = pixel.y - cy;
+                            expect(layer).to.be.painted(x, y);
+                            i++;
+                            rotate();
+                        }, 50);
+                    } else {
+                        idx++;
+                        load();
+                    }
+                }
+                rotate();
+
+            } else {
+                done();
+            }
+        }
+        load();
+    });
+
+    it('#2159 polygon sub geometries(Rectange/Ellipse/Sector) rotate missing z', function (done) {
+        layer.config('drawImmediate', true);
+        layer.clear();
+        map.config({ centerCross: true });
+        map.setCenter(center);
+        map.setZoom(17);
+
+        const symbol = {
+            polygonFill: '#fff',
+            lineWidth: 8
+            // polygonFill: '#fff'
+        };
+
+        const altitude = 100;
+        const center1 = center.copy();
+        center1.z = altitude;
+        const center2 = center.copy();
+        center2.z = altitude;
+        const center3 = center.copy();
+        center3.z = altitude;
+
+        const rectangle = new maptalks.Rectangle(center1, 200, 100, {
+            symbol
+        });
+        const ellipse = new maptalks.Ellipse(center2, 200, 100, {
+            symbol
+        });
+        const sector = new maptalks.Sector(center3, 100, 0, 90, {
+            symbol
+        });
+
+        const geos = [rectangle, ellipse, sector];
+        layer.addGeometry(geos);
+
+        setTimeout(() => {
+            geos.forEach(geo => {
+                const shell = geo.getShell();
+                const z = shell[0].z;
+                expect(z).to.be(altitude);
+                //rotate geometry
+                geo.rotate(Math.random() * 90);
+            })
+
+            setTimeout(() => {
+                geos.forEach(geo => {
+                    const shell = geo.getShell();
+                    const z = shell[0].z;
+                    expect(z).to.be(altitude);
+                })
+                done();
+            }, 40);
+
+        }, 40);
+
     });
 });

@@ -20,7 +20,7 @@ describe('Map.Spec', function () {
         map.config('zoomAnimationDuration', 20);
         map._getRenderer()._setCheckSizeInterval(20);
         baseLayer = new maptalks.VectorLayer('base_', new maptalks.Marker(center));
-        eventContainer = map._panels.front;
+        eventContainer = map.getPanels().front;
     });
 
     afterEach(function () {
@@ -77,8 +77,8 @@ describe('Map.Spec', function () {
             console.log(JSON.stringify(sp));
         });
 
-        it('_get2DExtent', function () {
-            var extent = map._get2DExtent(),
+        it('get2DExtent', function () {
+            var extent = map.get2DExtent(),
                 size = map.getSize();
 
             expect(extent).to.not.be(null);
@@ -181,6 +181,7 @@ describe('Map.Spec', function () {
         it('center is changed after setCenter', function () {
             var nc = new maptalks.Coordinate(119, 32).copy();
             map.setCenter(nc);
+            expect(map._centerZ === undefined).to.be.ok();
 
             expect(map.getCenter()).to.closeTo(nc);
         });
@@ -899,13 +900,31 @@ describe('Map.Spec', function () {
     it('#centercross when map.layers=0', function () {
         //clear all layers
         map.removeLayer(baseLayer);
-        map.options.centerCross=true;
-        map.once('frameend',function(){
-            expect(map).to.be.painted(0, 0); 
-            map.options.centerCross=false;
-            map.once('frameend',function(){
-                expect(map).not.to.be.painted(0, 0); 
+        map.options.centerCross = true;
+        map.once('frameend', function () {
+            expect(map).to.be.painted(0, 0);
+            map.options.centerCross = false;
+            map.once('frameend', function () {
+                expect(map).not.to.be.painted(0, 0);
             })
         })
+    });
+
+    it('#2128 clear glRes cache when SpatialReference change', function (done) {
+        //clear all layers
+        const glRes = map.getGLRes();
+        map.setSpatialReference({ projection:'EPSG:4326' });
+        setTimeout(() => {
+            expect(map.getGLRes()).not.to.be(glRes);
+            done();
+        }, 100);
+    });
+
+    it('map\'s center has altitude', function() {
+        const center = map.getCenter();
+        center.z = 100;
+        map.setCenter(center);
+        const viewMatrix = map.viewMatrix;
+        expect(viewMatrix).to.be.eql([-1, 0, 0, -0, 0, 1, 0, 0, 0, 0, -1, 0, 173083.2338488889, -49314.063792176465, 0.0703125, 1]);
     });
 });

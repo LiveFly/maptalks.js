@@ -5,8 +5,8 @@ describe('Geometry.main', function () {
     var center = new maptalks.Coordinate(118.846825, 32.046534);
     var layer;
     var context = {
-        map:map,
-        layer:layer
+        map: map,
+        layer: layer
     };
 
     beforeEach(function () {
@@ -27,20 +27,20 @@ describe('Geometry.main', function () {
     it('constructor options', function () {
         it('some common options', function () {
             var symbol = {
-                markerFile : 'file',
-                markerWidth : 10,
-                markerHeight : 15
+                markerFile: 'file',
+                markerWidth: 10,
+                markerHeight: 15
             };
             var properties = {
-                foo1 : 1,
-                foo2 : 'test',
-                foo3 : true
+                foo1: 1,
+                foo2: 'test',
+                foo3: true
             };
             var id = '1';
             var marker = new maptalks.Marker([0, 0], {
-                id : id,
-                symbol : symbol,
-                properties : properties
+                id: id,
+                symbol: symbol,
+                properties: properties
             });
 
             expect(marker.getProperties()).to.be.eql(properties);
@@ -64,7 +64,7 @@ describe('Geometry.main', function () {
         registerGeometryCommonTest.call(this, geometries[i], context);
     }
 
-    it('translate LineString', function (done)  {
+    it('translate LineString', function (done) {
         var line = new maptalks.LineString([
             { x: 121.111, y: 30.111 },
             { x: 121.222, y: 30.222 }
@@ -73,6 +73,81 @@ describe('Geometry.main', function () {
             done();
         });
         line.translate(-1, -1);
+    });
+
+    it('#1625 toJSON has rotate info', function (done) {
+        //rect ellipse etc
+        var geometries = GEN_GEOMETRIES_OF_ALL_TYPES().slice(0, 7).filter(g => {
+            return !!g.getShell;
+        });
+        let idx = 0;
+        const test = () => {
+            if (idx === geometries.length) {
+                done();
+                return;
+            }
+            const geo = geometries[idx];
+            geo.addTo(layer);
+            const angle = Math.round(Math.random() * 180);
+            geo.rotate(angle);
+
+            setTimeout(() => {
+                const json = geo.toJSON();
+                expect(json.options.rotateAngle).to.eql(angle);
+                idx++;
+                test();
+            }, 200);
+        }
+        test();
+    });
+
+    it('#2381 rotate pivot should change when coordinates change', function (done) {
+        //rect ellipse etc
+        const center = map.getCenter();
+        const rect = new maptalks.Rectangle(center, 100, 70);
+        const ellipse = new maptalks.Ellipse(center, 100, 70);
+        const sector = new maptalks.Sector(center, 50, 0, 45);
+        const geos = [rect, ellipse, sector];
+        let idx = 0;
+        const test = () => {
+            layer.clear();
+            if (idx === geos.length) {
+                done();
+                return;
+            } else {
+                const geo = geos[idx];
+                geo.addTo(layer);
+
+
+                const angle = Math.random() * 180;
+                const offset = Math.random() / 100;
+                geo.rotate(angle);
+
+                setTimeout(() => {
+                    expect(geo).to.have.property('_pivot');
+                    expect(geo).to.have.property('_angle');
+                    expect(geo._angle).to.eql(angle);
+
+                    expect(geo.options).to.have.property('rotateAngle');
+                    expect(geo.options.rotateAngle).to.eql(angle);
+
+                    expect(geo.options).to.have.property('rotatePivot');
+                    expect(geo.options.rotatePivot).to.be.an('array');
+
+                    const rotatePivot = geo.options.rotatePivot;
+                    geo.translate(new maptalks.Coordinate(offset, offset));
+
+                    setTimeout(() => {
+                        rotatePivot[0] += offset;
+                        rotatePivot[1] += offset;
+                        expect(geo.options.rotatePivot).to.eql(rotatePivot);
+                        idx++;
+                        test();
+                    }, 100);
+                }, 100);
+            }
+        }
+        test();
     });
 
 });
@@ -130,7 +205,7 @@ function registerGeometryCommonTest(geometry, _context) {
         it('Properties', function () {
             var oldProps = geometry.getProperties();
 
-            var props = { 'foo_num':1, 'foo_str':'str', 'foo_bool':false };
+            var props = { 'foo_num': 1, 'foo_str': 'str', 'foo_bool': false };
             geometry.setProperties(props);
 
             props = geometry.getProperties();
@@ -266,7 +341,7 @@ function registerGeometryCommonTest(geometry, _context) {
             geometry.remove();
             expect(geometry.getLayer()).to.not.be.ok();
 
-            var canvasLayer = new maptalks.VectorLayer('event_test_canvas', { 'render':'canvas' });
+            var canvasLayer = new maptalks.VectorLayer('event_test_canvas', { 'render': 'canvas' });
             canvasLayer.addGeometry(geometry);
             _context.map.addLayer(canvasLayer);
 
@@ -287,7 +362,7 @@ function registerGeometryCommonTest(geometry, _context) {
             expect(painter).to.be.ok();
             geometry.remove();
 
-            var canvasLayer = new maptalks.VectorLayer('event_test_canvas', { 'render':'canvas' });
+            var canvasLayer = new maptalks.VectorLayer('event_test_canvas', { 'render': 'canvas' });
             canvasLayer.addGeometry(geometry);
             _context.map.addLayer(canvasLayer);
 
@@ -305,7 +380,7 @@ function registerGeometryCommonTest(geometry, _context) {
             }
             if (type === 'Point') {
                 symbol = {
-                    'markerFile':'http://foo.com/foo.png'
+                    'markerFile': 'http://foo.com/foo.png'
                 };
                 geometry.setSymbol(symbol);
                 resource = geometry._getExternalResources();
@@ -313,8 +388,8 @@ function registerGeometryCommonTest(geometry, _context) {
                 expect(resource[0][0]).to.be(symbol['markerFile']);
             } else {
                 symbol = {
-                    'polygonPatternFile':'url(\'http://foo.com/foo.png\')',
-                    'linePatternFile':'url(\'http://foo.com/foo2.png\')',
+                    'polygonPatternFile': 'url(\'http://foo.com/foo.png\')',
+                    'linePatternFile': 'url(\'http://foo.com/foo2.png\')',
                 };
                 geometry.setSymbol(symbol);
                 resource = geometry._getExternalResources();
